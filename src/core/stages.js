@@ -1,0 +1,29 @@
+export const STAGES = Object.freeze({
+  VALIDATING: 0,
+  QUEUED: 1,
+  SYNCING_REPOSITORY: 2,
+  PREPARING_WORKSPACE: 3,
+  PREPARING_PROJECT: 4,
+  LOADING_UNITY: 5,
+  BUILDING: 6,
+  VERIFYING_ARTIFACT: 7,
+  UPLOADING: 8,
+  SUCCEEDED: 9,
+});
+
+export const STAGE_NAMES = Object.freeze({
+  0: 'VALIDATING',
+  1: 'QUEUED',
+  2: 'SYNCING_REPOSITORY',
+  3: 'PREPARING_WORKSPACE',
+  4: 'PREPARING_PROJECT',
+  5: 'LOADING_UNITY',
+  6: 'BUILDING',
+  7: 'VERIFYING_ARTIFACT',
+  8: 'UPLOADING',
+  9: 'SUCCEEDED',
+});
+
+export function stageName(stage) {
+  return STAGE_NAMES[stage] ?? `UNKNOWN_STAGE_${stage}`;
+}

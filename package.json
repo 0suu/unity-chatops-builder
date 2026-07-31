@@ -1,0 +1,20 @@
+{
+  "name": "unity-chatops-builder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build Unity Android APKs from Slack or Discord using a self-hosted macOS runner.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "start": "node src/index.js --config ./config.json",
+    "test": "node --test",
+    "check": "node scripts/check.mjs && node --test"
+  },
+  "dependencies": {
+    "@slack/bolt": "5.0.0",
+    "discord.js": "14.27.0"
+  },
+  "license": "UNLICENSED"
+}

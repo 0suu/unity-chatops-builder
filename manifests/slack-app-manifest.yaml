@@ -1,0 +1,29 @@
+display_information:
+  name: Unity ChatOps Builder
+  description: Build a Unity Android APK from a Slack message on a self-hosted macOS runner.
+  background_color: "#222222"
+features:
+  bot_user:
+    display_name: Unity Builder
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - groups:history
+      - chat:write
+      - files:write
+      - reactions:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+_metadata:
+  major_version: 2
+  minor_version: 1
