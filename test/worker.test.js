@@ -23,7 +23,7 @@ test('Worker consumes only the published snapshot and performs no Git/LFS operat
   let worker;
   try {
     const apkPath = path.join(directory, 'app.apk'); await writeFile(apkPath, 'apk');
-    const { job } = store.createJob({ platform: 'slack', workspaceId: 'T1', channelId: 'C1', sourceMessageId: '100.1', requesterId: 'U1', repositoryAlias: 'project', requestedBranch: 'suu/test', buildProfilePath: 'Assets/BuildProfiles/PICO.asset' });
+    const { job } = store.createJob({ platform: 'slack', workspaceId: 'T1', channelId: 'C1', sourceMessageId: '100.1', requesterId: 'U1', repositoryAlias: 'project', projectPath: 'UnityProject', requestedBranch: 'suu/test', buildProfilePath: 'Assets/BuildProfiles/PICO.asset' });
     store.setThread(job.id, '100.1');
     const manifest = { snapshotId: 'b'.repeat(64), repositoryId: 'project', commitSha: 'a'.repeat(40), filesDigest: 'c'.repeat(64), lfs: { enabled: true, objectCount: 1, totalSizeBytes: 3, objects: [] }, createdAt: new Date().toISOString() };
     store.setResolvedSource(job.id, { commitSha: manifest.commitSha, sourceSnapshotId: manifest.snapshotId, sourceSnapshotManifest: manifest, unityVersion: '6000.0.59f2' });
@@ -34,8 +34,8 @@ test('Worker consumes only the published snapshot and performs no Git/LFS operat
       async cleanupWorkspace(workspacePath) { await rm(workspacePath, { recursive: true, force: true }); },
     };
     const unityService = {
-      async inspectProject() { return { unityVersion: '6000.0.59f2', unityExecutable: '/fake/Unity' }; },
-      async build({ onSpawn }) { onSpawn(); return { path: apkPath, name: 'app.apk', logPath: path.join(directory, 'unity.log') }; },
+      async inspectProject(_workspacePath, buildProfilePath, projectPath) { assert.equal(buildProfilePath, 'Assets/BuildProfiles/PICO.asset'); assert.equal(projectPath, 'UnityProject'); return { unityVersion: '6000.0.59f2', unityExecutable: '/fake/Unity', projectPath: path.join(directory, 'workspace', 'UnityProject') }; },
+      async build({ onSpawn, projectPath }) { assert.equal(projectPath, path.join(directory, 'workspace', 'UnityProject')); onSpawn(); return { path: apkPath, name: 'app.apk', logPath: path.join(directory, 'unity.log') }; },
     };
     const artifactVerifier = { async verify(candidate) { return { ...candidate, size: 3, sha256: 'd'.repeat(64) }; } };
     const artifactPublisher = { async publish(jobValue, artifact, text) { adapter.uploads.push({ job: jobValue, artifact, text }); return { platform: 'slack', fileIds: ['F1'] }; } };

@@ -28,6 +28,7 @@ export class JobStore {
         requester_id TEXT NOT NULL,
         requester_name TEXT,
         repository_alias TEXT NOT NULL,
+        project_path TEXT NOT NULL DEFAULT '.',
         requested_branch TEXT,
         build_profile_path TEXT,
         resolved_commit_sha TEXT,
@@ -72,6 +73,7 @@ export class JobStore {
     `);
     this.#ensureColumn('jobs', 'source_snapshot_id', 'TEXT');
     this.#ensureColumn('jobs', 'source_manifest_json', 'TEXT');
+    this.#ensureColumn('jobs', 'project_path', "TEXT NOT NULL DEFAULT '.'");
     this.db.exec('CREATE INDEX IF NOT EXISTS jobs_snapshot_idx ON jobs(source_snapshot_id);');
   }
 
@@ -86,14 +88,14 @@ export class JobStore {
     const result = this.db.prepare(`
       INSERT OR IGNORE INTO jobs (
         id, platform, workspace_id, channel_id, source_message_id,
-        requester_id, requester_name, repository_alias,
+        requester_id, requester_name, repository_alias, project_path,
         requested_branch, build_profile_path, status, created_at
       ) VALUES (
         :id, :platform, :workspaceId, :channelId, :sourceMessageId,
-        :requesterId, :requesterName, :repositoryAlias,
+        :requesterId, :requesterName, :repositoryAlias, :projectPath,
         :requestedBranch, :buildProfilePath, 'VALIDATING', :createdAt
       )
-    `).run({ id, platform: input.platform, workspaceId: input.workspaceId ?? null, channelId: input.channelId, sourceMessageId: input.sourceMessageId, requesterId: input.requesterId, requesterName: input.requesterName ?? null, repositoryAlias: input.repositoryAlias, requestedBranch: input.requestedBranch ?? null, buildProfilePath: input.buildProfilePath ?? null, createdAt: now });
+    `).run({ id, platform: input.platform, workspaceId: input.workspaceId ?? null, channelId: input.channelId, sourceMessageId: input.sourceMessageId, requesterId: input.requesterId, requesterName: input.requesterName ?? null, repositoryAlias: input.repositoryAlias, projectPath: input.projectPath ?? '.', requestedBranch: input.requestedBranch ?? null, buildProfilePath: input.buildProfilePath ?? null, createdAt: now });
     const job = result.changes > 0 ? this.getJob(id) : this.getJobByMessage(input.platform, input.channelId, input.sourceMessageId);
     if (result.changes > 0) this.appendEvent(id, 'JOB_CREATED', 0, { platform: input.platform });
     return { created: result.changes > 0, job };
@@ -203,7 +205,7 @@ function mapJob(row) {
   if (!row) return null;
   return {
     sequence: Number(row.sequence), id: row.id, platform: row.platform, workspaceId: row.workspace_id, channelId: row.channel_id, sourceMessageId: row.source_message_id, threadId: row.thread_id,
-    requesterId: row.requester_id, requesterName: row.requester_name, repositoryAlias: row.repository_alias, requestedBranch: row.requested_branch, buildProfilePath: row.build_profile_path,
+    requesterId: row.requester_id, requesterName: row.requester_name, repositoryAlias: row.repository_alias, projectPath: row.project_path ?? '.', requestedBranch: row.requested_branch, buildProfilePath: row.build_profile_path,
     resolvedCommitSha: row.resolved_commit_sha, sourceSnapshotId: row.source_snapshot_id, sourceSnapshotManifest: parseJson(row.source_manifest_json), unityVersion: row.unity_version,
     status: row.status, desiredStatus: row.desired_status, appliedStatus: row.applied_status, jobResult: row.job_result, buildResult: row.build_result, artifactResult: row.artifact_result, deliveryResult: row.delivery_result,
     attempt: Number(row.attempt), createdAt: row.created_at, queuedAt: row.queued_at, startedAt: row.started_at, finishedAt: row.finished_at, heartbeatAt: row.heartbeat_at,

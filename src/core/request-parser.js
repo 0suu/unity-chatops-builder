@@ -1,6 +1,7 @@
 const KEY_ALIASES = new Map([
   ['repository', 'repository'],
   ['repo', 'repository'],
+  ['project', 'project'],
   ['branch', 'branch'],
   ['profile', 'profile'],
 ]);
@@ -65,7 +66,7 @@ export function parseBuildRequest(text) {
   return {
     recognized: true,
     value: Object.fromEntries(
-      REQUIRED_KEYS.map((key) => [key, values.get(key)]),
+      [...REQUIRED_KEYS, ...(values.has('project') ? ['project'] : [])].map((key) => [key, values.get(key)]),
     ),
   };
 }

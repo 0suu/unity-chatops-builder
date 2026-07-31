@@ -43,7 +43,7 @@ export class BuildWorker {
 
       await this.statusService.setStage(claimedJob.id, STAGES.ENSURING_UNITY);
       let job = this.store.getJob(claimedJob.id);
-      const project = await this.unityService.inspectProject(workspacePath, job.buildProfilePath);
+      const project = await this.unityService.inspectProject(workspacePath, job.buildProfilePath, job.projectPath);
       if (job.unityVersion && project.unityVersion !== job.unityVersion) {
         throw new CiError({ code: 'SOURCE_SNAPSHOT_UNITY_VERSION_MISMATCH', category: 'UNITY_ENV_ERROR', message: 'SnapshotのUnity versionがCoordinatorの検証結果と一致しません。', stage: STAGES.ENSURING_UNITY, details: { expected: job.unityVersion, actual: project.unityVersion } });
       }
@@ -53,7 +53,7 @@ export class BuildWorker {
       job = this.store.getJob(job.id);
       let stageSixUpdate = Promise.resolve();
       const candidate = await this.unityService.build({
-        job, workspacePath, unityExecutable: project.unityExecutable, signal: this.currentAbortController.signal,
+        job, workspacePath, projectPath: project.projectPath, unityExecutable: project.unityExecutable, signal: this.currentAbortController.signal,
         onSpawn: () => { stageSixUpdate = this.statusService.setStage(job.id, STAGES.BUILDING); stageSixUpdate.catch((error) => this.logger?.warn('Failed to update BUILDING status.', { jobId: job.id, error })); },
       });
       await stageSixUpdate;
@@ -97,7 +97,7 @@ export class BuildWorker {
 }
 
 function formatSuccess(job, artifact, durationMs) {
-  return [`✅ Build \`${job.id}\` succeeded`, '', `Branch: \`${job.requestedBranch}\``, `Commit: \`${shortSha(job.resolvedCommitSha)}\``, `Snapshot: \`${job.sourceSnapshotId}\``, `Profile: \`${job.buildProfilePath}\``, `Unity: \`${job.unityVersion}\``, `Size: ${formatBytes(artifact.size)}`, `SHA-256: \`${artifact.sha256}\``, `Duration: ${formatDuration(durationMs)}`].join('\n');
+  return [`✅ Build \`${job.id}\` succeeded`, '', `Branch: \`${job.requestedBranch}\``, ...(job.projectPath !== '.' ? [`Project: \`${job.projectPath}\``] : []), `Commit: \`${shortSha(job.resolvedCommitSha)}\``, `Snapshot: \`${job.sourceSnapshotId}\``, `Profile: \`${job.buildProfilePath}\``, `Unity: \`${job.unityVersion}\``, `Size: ${formatBytes(artifact.size)}`, `SHA-256: \`${artifact.sha256}\``, `Duration: ${formatDuration(durationMs)}`].join('\n');
 }
 function formatFailure(job, error, redactor) { const stage = error.stage; const lines = [`❌ Build \`${job.id}\` failed`, '', `Stage: ${stage === null || stage === undefined ? 'unknown' : `${stage} / ${stageName(stage)}`}`, `Code: \`${error.code}\``]; if (job.resolvedCommitSha) lines.push(`Commit: \`${shortSha(job.resolvedCommitSha)}\``); if (job.sourceSnapshotId) lines.push(`Snapshot: \`${job.sourceSnapshotId}\``); lines.push('', error.message); const logTail = error.details?.logTail ?? error.details?.stderr; if (logTail) lines.push('', 'ログ末尾:', codeBlock(redactor?.redact(logTail) ?? logTail)); if (error.category === 'DELIVERY_ERROR' && job.artifactPath) lines.push('', `APKはMac上に保持されています: \`${job.artifactPath}\``); return lines.join('\n'); }
 function resultForCategory(category) { return ['REQUEST_ERROR', 'SOURCE_ERROR', 'GIT_ERROR', 'WORKSPACE_ERROR', 'UNITY_ENV_ERROR', 'UNITY_BUILD_ERROR', 'ARTIFACT_ERROR', 'DELIVERY_ERROR', 'RUNNER_ERROR'].includes(category) ? category : 'FAILED'; }

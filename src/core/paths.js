@@ -30,6 +30,32 @@ export function validateBuildProfilePath(input) {
   return { ok: true, value: normalized };
 }
 
+export function validateUnityProjectPath(input) {
+  const value = input === undefined || input === null || input === '' ? '.' : input;
+  if (typeof value !== 'string' || value.length === 0) {
+    return { ok: false, reason: 'Unity project path is empty.' };
+  }
+  if (value === '.') return { ok: true, value };
+  if (value.includes('\\') || value.includes('\0')) {
+    return { ok: false, reason: 'Unity project path must use forward slashes.' };
+  }
+  if (path.posix.isAbsolute(value)) {
+    return { ok: false, reason: 'Unity project path must be relative.' };
+  }
+
+  const segments = value.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    return { ok: false, reason: 'Unity project path contains an invalid segment.' };
+  }
+
+  const normalized = path.posix.normalize(value);
+  if (normalized !== value) {
+    return { ok: false, reason: 'Unity project path is not normalized.' };
+  }
+
+  return { ok: true, value: normalized };
+}
+
 export function isPathInside(parentPath, candidatePath) {
   const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);

@@ -10,10 +10,13 @@ SlackまたはDiscordから、macOS上のUnity EditorへAPKビルドを依頼す
 unity-build
 repository: 0suu/my-unity-project
 branch: main
+project: UnityProject
 profile: Assets/BuildProfiles/PICO-Development.asset
 ```
 
 `repo:`は`repository:`の短縮形です。Repositoryには`owner/repository`、`github.com/owner/repository`、GitHubのSSH URL、HTTPS URLを指定できます。入力は認証情報を含まない`git@host:owner/repository.git`へ正規化されます。
+
+`project:`はRepository内のUnityプロジェクトルートへの相対pathです。省略時はRepository直下（`.`）を使用します。Profileは選択したUnityプロジェクトを基準にした`Assets/...` pathで指定します。空白を含むpathも使用できます。
 
 Repositoryへのアクセス可否はCoordinatorが実際にSSH clone/fetchして判定します。アクセスできなければ`REPOSITORY_ACCESS_FAILED`または`GIT_FETCH_FAILED`としてスレッドへ返信し、Workerへは渡しません。
 

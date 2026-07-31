@@ -1,5 +1,5 @@
 import { parseBuildRequest } from '../core/request-parser.js';
-import { validateBuildProfilePath } from '../core/paths.js';
+import { validateBuildProfilePath, validateUnityProjectPath } from '../core/paths.js';
 import { CiError, asCiError } from '../core/errors.js';
 import { STAGES } from '../core/stages.js';
 import { codeBlock, formatBytes, shortSha } from '../utils/format.js';
@@ -20,7 +20,7 @@ export class BuildCoordinator {
     const { created, job: initialJob } = this.store.createJob({
       platform: message.platform, workspaceId: message.workspaceId, channelId: message.channelId, sourceMessageId: message.sourceMessageId,
       requesterId: message.requesterId, requesterName: message.requesterName, repositoryAlias: repositoryIdentity,
-      requestedBranch: parsed.value?.branch ?? null, buildProfilePath: parsed.value?.profile ?? null,
+      projectPath: parsed.value?.project ?? '.', requestedBranch: parsed.value?.branch ?? null, buildProfilePath: parsed.value?.profile ?? null,
     });
     if (!created) { this.logger?.debug('Duplicate chat event ignored.', { jobId: initialJob?.id }); return; }
     const adapter = this.adapters.get(message.platform);
@@ -35,10 +35,10 @@ export class BuildCoordinator {
     }
 
     try {
-      const profilePath = this.#validateRequest(parsed, repository);
+      const request = this.#validateRequest(parsed, repository);
       await this.sourceResolver.validateBranchName(parsed.value.branch);
       await this.statusService.setStage(job.id, STAGES.RESOLVING_SOURCE);
-      const resolved = await this.sourceResolver.resolve({ repository: repository.value, requestedRef: parsed.value.branch });
+      const resolved = await this.sourceResolver.resolve({ repository: repository.value, requestedRef: parsed.value.branch, projectPath: request.projectPath });
       this.store.setResolvedSource(job.id, resolved); job = this.store.getJob(job.id);
       await this.#postThreadSafely(job, [
         'Sourceを解決しました。',
@@ -53,7 +53,8 @@ export class BuildCoordinator {
         `Build \`${job.id}\` を受け付けました。`, '',
         `Repository: \`${repository.value.displayName}\``,
         `Branch: \`${job.requestedBranch}\``,
-        `Profile: \`${profilePath}\``,
+        ...(job.projectPath !== '.' ? [`Project: \`${job.projectPath}\``] : []),
+        `Profile: \`${request.profilePath}\``,
         `Queue: ${queuePosition}番目`,
       ].join('\n'));
       this.onQueued?.();
@@ -65,11 +66,13 @@ export class BuildCoordinator {
   #validateRequest(parsed, repository) {
     if (parsed.errors?.length) throw new CiError({ code: 'INVALID_REQUEST_FORMAT', category: 'REQUEST_ERROR', message: 'ビルド要求の形式が正しくありません。', stage: STAGES.AUTHORIZING, details: { errors: parsed.errors } });
     if (!repository.ok) throw new CiError({ code: 'INVALID_REPOSITORY', category: 'REQUEST_ERROR', message: repository.reason, stage: STAGES.AUTHORIZING });
+    const project = validateUnityProjectPath(parsed.value.project ?? '.');
+    if (!project.ok) throw new CiError({ code: 'INVALID_UNITY_PROJECT_PATH', category: 'REQUEST_ERROR', message: project.reason, stage: STAGES.AUTHORIZING });
     const profile = validateBuildProfilePath(parsed.value.profile);
     if (!profile.ok) throw new CiError({ code: 'INVALID_BUILD_PROFILE_PATH', category: 'REQUEST_ERROR', message: profile.reason, stage: STAGES.AUTHORIZING });
     if (this.config.unity.allowedBuildProfiles.length > 0 && !this.config.unity.allowedBuildProfiles.includes(profile.value)) throw new CiError({ code: 'BUILD_PROFILE_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたBuild Profileは許可リストにありません。', stage: STAGES.AUTHORIZING });
     if (!this.config.repositoryAccess.compiledBranchPatterns.some((pattern) => pattern.test(parsed.value.branch))) throw new CiError({ code: 'BRANCH_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたブランチ名は許可パターンに一致しません。', stage: STAGES.AUTHORIZING });
-    return profile.value;
+    return { projectPath: project.value, profilePath: profile.value };
   }
 
   async #reject(job, error) {

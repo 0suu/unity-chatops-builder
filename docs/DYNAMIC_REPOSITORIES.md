@@ -6,10 +6,12 @@
 unity-build
 repository: organization/project
 branch: feature/example
+project: projects/client
 profile: Assets/BuildProfiles/PICO-Development.asset
 ```
 
 `repository`は要求ごとに必須です。`repo`も同義です。
+`project`はRepository内のUnityプロジェクトルートへの相対pathで、省略時は`.`です。`profile`はそのUnityプロジェクトを基準にした`Assets/...` pathです。
 
 ## Resolution
 

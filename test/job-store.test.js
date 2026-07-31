@@ -9,12 +9,13 @@ test('stores the resolved snapshot before queueing and exposes GC protections', 
   const directory = await mkdtemp(path.join(os.tmpdir(), 'job-store-'));
   const store = new JobStore(path.join(directory, 'jobs.sqlite3'));
   try {
-    const { job } = store.createJob({ platform: 'slack', channelId: 'C1', sourceMessageId: '1', requesterId: 'U1', repositoryAlias: 'project', requestedBranch: 'suu/test', buildProfilePath: 'Assets/PICO.asset' });
+    const { job } = store.createJob({ platform: 'slack', channelId: 'C1', sourceMessageId: '1', requesterId: 'U1', repositoryAlias: 'project', projectPath: 'UnityProject', requestedBranch: 'suu/test', buildProfilePath: 'Assets/PICO.asset' });
     const manifest = { snapshotId: 'b'.repeat(64), repositoryId: 'project', commitSha: 'a'.repeat(40), filesDigest: 'c'.repeat(64), lfs: { enabled: true, objectCount: 1, totalSizeBytes: 4, objects: [{ path: 'a', oidSha256: 'd'.repeat(64), sizeBytes: 4 }] }, createdAt: new Date().toISOString() };
     store.setResolvedSource(job.id, { commitSha: 'a'.repeat(40), sourceSnapshotId: manifest.snapshotId, sourceSnapshotManifest: manifest, unityVersion: '6000.0.59f2' });
     store.setQueued(job.id);
     const stored = store.getJob(job.id);
     assert.equal(stored.sourceSnapshotId, manifest.snapshotId);
+    assert.equal(stored.projectPath, 'UnityProject');
     assert.equal(stored.status, 'QUEUED');
     assert.deepEqual(store.listProtectedSourceSnapshotIds(), [manifest.snapshotId]);
   } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
@@ -92,6 +93,7 @@ test('migrates an existing initial-version database before creating the snapshot
     const columns = migrated.db.prepare('PRAGMA table_info(jobs)').all().map((row) => row.name);
     assert.ok(columns.includes('source_snapshot_id'));
     assert.ok(columns.includes('source_manifest_json'));
+    assert.ok(columns.includes('project_path'));
     const indexes = migrated.db.prepare('PRAGMA index_list(jobs)').all().map((row) => row.name);
     assert.ok(indexes.includes('jobs_snapshot_idx'));
   } finally {

@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { access, lstat, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CiError, asCiError } from '../core/errors.js';
 import { STAGES } from '../core/stages.js';
 import { runProcess } from '../core/process-runner.js';
-import { isPathInsideOrEqual, safeSlug } from '../core/paths.js';
+import { isPathInsideOrEqual, safeSlug, validateUnityProjectPath } from '../core/paths.js';
 import { coordinatorSourceEnvironment } from './lfs-auth-provider.js';
 import { parseLfsPointer } from './lfs-pointer.js';
 
@@ -14,10 +14,12 @@ export class RepositorySourceResolver {
     this.repositoriesRoot = path.join(dataDir, 'repositories'); this.stagingRoot = path.join(dataDir, 'source-staging'); this.timeoutMs = config.runner.gitTimeoutSeconds * 1000; this.environment = coordinatorSourceEnvironment(); this.serial = Promise.resolve();
   }
   validateBranchName(branch) { return this.#assertValidBranch(branch); }
-  resolve({ repository, requestedRef }) { const task = this.serial.then(() => this.#resolve(repository, requestedRef)); this.serial = task.catch(() => {}); return task; }
+  resolve({ repository, requestedRef, projectPath = '.' }) { const task = this.serial.then(() => this.#resolve(repository, requestedRef, projectPath)); this.serial = task.catch(() => {}); return task; }
 
-  async #resolve(repository, branch) {
+  async #resolve(repository, branch, projectPath) {
     this.#assertRepository(repository); await this.#assertValidBranch(branch);
+    const project = validateUnityProjectPath(projectPath);
+    if (!project.ok) throw new CiError({ code: 'INVALID_UNITY_PROJECT_PATH', category: 'REQUEST_ERROR', message: project.reason, stage: STAGES.AUTHORIZING });
     const mirrorPath = this.#mirrorPath(repository);
     const commitSha = await this.#synchronizeAndResolve(repository, branch, mirrorPath);
     const stagingPath = path.join(this.stagingRoot, `${safeSlug(repository.owner)}-${safeSlug(repository.name)}-${commitSha.slice(0, 12)}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -46,7 +48,7 @@ export class RepositorySourceResolver {
           const objectPaths = await this.lfsObjectCache.prepare({ pointers, lfsClient: this.lfsClient, remoteUrl: repository.sshUrl, endpointUrl, protectionLease });
           for (const pointer of pointers) await this.lfsObjectCache.materialize({ cachePath: objectPaths.get(pointer.oidSha256), destinationPath: safeSourcePath(stagingPath, pointer.path), mode: pointer.mode, expectedOidSha256: pointer.oidSha256, expectedSizeBytes: pointer.sizeBytes });
         }
-        unityVersion = await readUnityVersion(stagingPath);
+        unityVersion = await readUnityVersion(stagingPath, project.value);
         snapshot = await this.snapshotStore.publish({ repositoryId: repository.id, commitSha, stagingPath, lfsObjects: pointers });
       } finally { await protectionLease?.release(); }
       return { repositoryId: repository.id, repositoryDisplayName: repository.displayName, commitSha, unityVersion, sourceSnapshotId: snapshot.snapshotId, sourceSnapshotManifest: snapshot.manifest };
@@ -89,7 +91,34 @@ export class RepositorySourceResolver {
   #git(args, overrides = {}) { return this.processRunner('git', args, { timeoutMs: this.timeoutMs, env: this.environment, logger: this.logger, ...overrides }); }
 }
 
-async function readUnityVersion(stagingPath) { const file = path.join(stagingPath, 'ProjectSettings', 'ProjectVersion.txt'); let content; try { content = await readFile(file, 'utf8'); } catch (error) { throw sourceError('UNITY_VERSION_FILE_MISSING', 'ProjectSettings/ProjectVersion.txtを読めません。', { cause: error.message }); } const match = /^m_EditorVersion:\s*(\S+)\s*$/m.exec(content); if (!match) throw sourceError('UNITY_VERSION_INVALID', 'ProjectVersion.txtからUnity versionを解析できません。'); return match[1]; }
+async function readUnityVersion(stagingPath, projectPath) {
+  const projectRoot = safeSourcePath(stagingPath, projectPath);
+  let projectRootRealPath;
+  try {
+    const projectStat = await lstat(projectRoot);
+    if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) throw new Error('project is not a regular non-symlink directory');
+    const [stagingRealPath, resolvedProjectRoot] = await Promise.all([realpath(stagingPath), realpath(projectRoot)]);
+    if (!isPathInsideOrEqual(stagingRealPath, resolvedProjectRoot)) throw new Error('project escapes staging');
+    projectRootRealPath = resolvedProjectRoot;
+  } catch (error) {
+    throw sourceError('UNITY_PROJECT_NOT_FOUND', '指定されたUnityプロジェクトをSource Staging内で確認できません。', { projectPath, cause: error.message });
+  }
+
+  const file = path.join(projectRoot, 'ProjectSettings', 'ProjectVersion.txt');
+  let content;
+  try {
+    const fileStat = await lstat(file);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink()) throw new Error('ProjectVersion.txt is not a regular non-symlink file');
+    const resolvedFile = await realpath(file);
+    if (!isPathInsideOrEqual(projectRootRealPath, resolvedFile)) throw new Error('ProjectVersion.txt escapes project');
+    content = await readFile(file, 'utf8');
+  } catch (error) {
+    throw sourceError('UNITY_VERSION_FILE_MISSING', '指定されたUnityプロジェクトのProjectSettings/ProjectVersion.txtを読めません。', { projectPath, cause: error.message });
+  }
+  const match = /^m_EditorVersion:\s*(\S+)\s*$/m.exec(content);
+  if (!match) throw sourceError('UNITY_VERSION_INVALID', 'ProjectVersion.txtからUnity versionを解析できません。', { projectPath });
+  return match[1];
+}
 function safeSourcePath(root, relative) { if (typeof relative !== 'string' || relative.includes('\0') || path.isAbsolute(relative)) throw sourceError('SOURCE_PATH_INVALID', 'Source pathが不正です。', { path: relative }); const target = path.resolve(root, relative); if (!isPathInsideOrEqual(root, target)) throw sourceError('SOURCE_PATH_INVALID', 'Source pathがstaging外を指しています。', { path: relative }); return target; }
 async function readOptional(file) { try { return await readFile(file, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; } }
 async function exists(target) { try { await access(target); return true; } catch { return false; } }

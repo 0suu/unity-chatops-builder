@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { CiError } from '../core/errors.js';
 import { STAGES } from '../core/stages.js';
-import { isPathInsideOrEqual, safeSlug } from '../core/paths.js';
+import { isPathInsideOrEqual, safeSlug, validateUnityProjectPath } from '../core/paths.js';
 import { runProcess, sanitizedEnvironment } from '../core/process-runner.js';
 import { tailFile } from '../utils/format.js';
 
@@ -14,8 +14,40 @@ export class UnityService {
     this.logger = logger;
   }
 
-  async inspectProject(workspacePath, buildProfilePath) {
-    const projectVersionPath = path.join(workspacePath, 'ProjectSettings', 'ProjectVersion.txt');
+  async inspectProject(workspacePath, buildProfilePath, projectPath = '.') {
+    const project = validateUnityProjectPath(projectPath);
+    if (!project.ok) {
+      throw new CiError({
+        code: 'INVALID_UNITY_PROJECT_PATH',
+        category: 'UNITY_ENV_ERROR',
+        message: project.reason,
+        stage: STAGES.PREPARING_PROJECT,
+      });
+    }
+
+    const projectAbsolutePath = path.join(workspacePath, ...project.value.split('/'));
+    let workspaceRealPath;
+    let projectRealPath;
+    try {
+      const projectStat = await lstat(projectAbsolutePath);
+      if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) throw new Error('not a regular non-symlink directory');
+      [workspaceRealPath, projectRealPath] = await Promise.all([
+        realpath(workspacePath),
+        realpath(projectAbsolutePath),
+      ]);
+      if (!isPathInsideOrEqual(workspaceRealPath, projectRealPath)) throw new Error('project escapes workspace');
+    } catch (error) {
+      throw new CiError({
+        code: 'UNITY_PROJECT_NOT_FOUND',
+        category: 'UNITY_ENV_ERROR',
+        message: '指定されたUnityプロジェクトをcheckout後のRepository内で確認できませんでした。',
+        stage: STAGES.PREPARING_PROJECT,
+        details: { projectPath: project.value },
+        cause: error,
+      });
+    }
+
+    const projectVersionPath = path.join(projectAbsolutePath, 'ProjectSettings', 'ProjectVersion.txt');
     let projectVersionText;
     try {
       projectVersionText = await readFile(projectVersionPath, 'utf8');
@@ -58,30 +90,27 @@ export class UnityService {
       });
     }
 
-    const profileAbsolutePath = path.join(workspacePath, ...buildProfilePath.split('/'));
+    const profileAbsolutePath = path.join(projectAbsolutePath, ...buildProfilePath.split('/'));
     try {
       const profileStat = await lstat(profileAbsolutePath);
       if (!profileStat.isFile() || profileStat.isSymbolicLink()) throw new Error('not a regular non-symlink file');
-      const [workspaceRealPath, profileRealPath] = await Promise.all([
-        realpath(workspacePath),
-        realpath(profileAbsolutePath),
-      ]);
-      if (!isPathInsideOrEqual(workspaceRealPath, profileRealPath)) throw new Error('profile escapes workspace');
+      const profileRealPath = await realpath(profileAbsolutePath);
+      if (!isPathInsideOrEqual(projectRealPath, profileRealPath)) throw new Error('profile escapes project');
     } catch (error) {
       throw new CiError({
         code: 'BUILD_PROFILE_NOT_FOUND',
         category: 'UNITY_ENV_ERROR',
         message: '指定されたBuild Profile assetをcheckout後のプロジェクト内で確認できませんでした。',
         stage: STAGES.PREPARING_PROJECT,
-        details: { buildProfilePath },
+        details: { projectPath: project.value, buildProfilePath },
         cause: error,
       });
     }
 
-    return { unityVersion, unityExecutable };
+    return { unityVersion, unityExecutable, projectPath: projectAbsolutePath };
   }
 
-  async build({ job, workspacePath, unityExecutable, onSpawn, signal }) {
+  async build({ job, workspacePath, projectPath = workspacePath, unityExecutable, onSpawn, signal }) {
     const artifactDirectory = path.join(this.dataDir, 'artifacts', job.id);
     const logDirectory = path.join(this.dataDir, 'logs', job.id);
     await Promise.all([
@@ -102,7 +131,7 @@ export class UnityService {
     const args = [
       '-batchmode',
       '-quit',
-      '-projectPath', workspacePath,
+      '-projectPath', projectPath,
       '-activeBuildProfile', job.buildProfilePath,
       '-build', artifactPath,
       '-logFile', logPath,
