@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.0suu.unity-chatops-builder</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/unity-ci/unity-chatops-builder/src/index.js</string>
+    <string>--config</string>
+    <string>/Users/unity-ci/.config/unity-chatops-builder/config.json</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/unity-ci/unity-chatops-builder</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LOG_LEVEL</key>
+    <string>info</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/unity-ci/Library/Logs/unity-chatops-builder/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/unity-ci/Library/Logs/unity-chatops-builder/stderr.log</string>
+</dict>
+</plist>
