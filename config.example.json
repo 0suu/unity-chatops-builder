@@ -6,7 +6,22 @@
     "allowedBranchPatterns": [
       "^(suu|feature|fix|release)/.+$"
     ],
-    "useGitLfs": "auto"
+    "sourceDependencies": {
+      "gitLfs": {
+        "enabled": true,
+        "mode": "materialize_in_source_snapshot",
+        "maxObjectBytes": 10737418240,
+        "maxTotalBytesPerJob": 53687091200,
+        "allowRepositoryLfsconfig": false,
+        "allowedEndpointHosts": [
+          "github.com",
+          "githubusercontent.com"
+        ]
+      },
+      "submodules": {
+        "enabled": false
+      }
+    }
   },
   "unity": {
     "editorsRoot": "/Applications/Unity/Hub/Editor",
@@ -21,11 +36,21 @@
     "failedRetentionDays": 1,
     "logsRetentionDays": 14
   },
+  "storage": {
+    "lfsObjects": {
+      "maxTotalGb": 300,
+      "retentionDays": 60
+    },
+    "sourceSnapshots": {
+      "retentionDays": 60
+    }
+  },
   "runner": {
     "pollIntervalMs": 2000,
     "heartbeatIntervalMs": 15000,
     "interruptedJobRetries": 1,
-    "gitTimeoutSeconds": 600
+    "gitTimeoutSeconds": 600,
+    "lfsRequestTimeoutSeconds": 600
   },
   "slack": {
     "enabled": false,
