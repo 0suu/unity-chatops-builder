@@ -42,6 +42,24 @@ Repositoryへのアクセス可否はCoordinatorが実際にSSH clone/fetchし�
 
 `profile`は`Assets/`配下の正規化済み`.asset` pathである必要があります。`unity.allowedBuildProfiles`が空なら、Snapshot内に実在する安全なpathを利用できます。列挙した場合はそのpathだけを許可します。
 
+## NuGetForUnity
+
+fresh workspaceでUnityの初回コンパイルより前にNuGet packageを復元するため、`Assets/NuGet.config`と`Assets/packages.config`があるプロジェクトではStage 5でNuGetForUnity CLI 4.5.0を実行します。CLIはbuilderの`.config/dotnet-tools.json`で固定され、必要時に`dotnet tool restore`で準備されます。
+
+初期ポリシーでは、資格情報なしの`https://api.nuget.org/v3/index.json`、`Assets/Packages`への配置、NuGetForUnity 4.5.0だけを許可します。custom feed、credential provider、plugin、project外への復元は拒否します。`.nupkg` cacheもjob workspace内の`Library/NuGetForUnityCache`へ分離します。
+
+```json
+{
+  "unity": {
+    "nugetForUnity": {
+      "enabled": true,
+      "restoreTimeoutSeconds": 600,
+      "cliRestoreTimeoutSeconds": 300
+    }
+  }
+}
+```
+
 ## SourceとGit LFS
 
 ```text
@@ -92,7 +110,7 @@ Git LFS設定はrootの`sourceDependencies`へ置きます。
 | 2 | `WAITING_FOR_WORKER` | Queue待機中 |
 | 3 | `MATERIALIZING_WORKSPACE` | Workspace作成中 |
 | 4 | `ENSURING_UNITY` | UnityとProfile検証中 |
-| 5 | `RESTORING_CACHE` | Cache準備中 |
+| 5 | `RESTORING_DEPENDENCIES` | NuGet等の依存関係を復元中 |
 | 6 | `BUILDING` | Unity build中 |
 | 7 | `PUBLISHING_ARTIFACT` | APK検証・配送中 |
 | 8 | `CLEANING_UP` | Cleanup中 |

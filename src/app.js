@@ -10,6 +10,7 @@ import { DiscordAdapter } from './chat/discord-adapter.js';
 import { StatusService } from './chat/status-service.js';
 import { BuildCoordinator } from './chat/coordinator.js';
 import { UnityService } from './build/unity-service.js';
+import { NugetForUnityService } from './build/nuget-for-unity-service.js';
 import { ArtifactVerifier } from './build/artifact-verifier.js';
 import { ArtifactPublisher } from './build/artifact-publisher.js';
 import { BuildWorker } from './build/worker.js';
@@ -56,9 +57,10 @@ export class Application {
       const sourceResolver = new RepositorySourceResolver({ config: this.config, dataDir: this.config.dataDir, logger: this.logger, endpointPolicy, lfsObjectCache, lfsClient, snapshotStore });
 
       const unityService = new UnityService({ config: this.config, dataDir: this.config.dataDir, logger: this.logger });
+      const dependencyRestorer = new NugetForUnityService({ config: this.config, logger: this.logger });
       const artifactVerifier = new ArtifactVerifier({ maxBytes: this.config.artifacts.maxBytes, logger: this.logger });
       const artifactPublisher = new ArtifactPublisher({ adapters: this.adapters });
-      this.worker = new BuildWorker({ config: this.config, store: this.store, adapters: this.adapters, statusService, snapshotStore, unityService, artifactVerifier, artifactPublisher, logger: this.logger, redactor: this.redactor });
+      this.worker = new BuildWorker({ config: this.config, store: this.store, adapters: this.adapters, statusService, snapshotStore, unityService, dependencyRestorer, artifactVerifier, artifactPublisher, logger: this.logger, redactor: this.redactor });
       const coordinator = new BuildCoordinator({ config: this.config, store: this.store, adapters: this.adapters, statusService, sourceResolver, logger: this.logger, onQueued: () => this.worker.wake() });
       coordinator.registerHandlers();
 

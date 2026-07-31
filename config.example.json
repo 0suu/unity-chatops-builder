@@ -19,7 +19,12 @@
   "unity": {
     "editorsRoot": "/Applications/Unity/Hub/Editor",
     "buildTimeoutMinutes": 90,
-    "allowedBuildProfiles": []
+    "allowedBuildProfiles": [],
+    "nugetForUnity": {
+      "enabled": true,
+      "restoreTimeoutSeconds": 600,
+      "cliRestoreTimeoutSeconds": 300
+    }
   },
   "artifacts": {
     "maxBytes": 1000000000,

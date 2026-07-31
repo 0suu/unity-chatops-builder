@@ -58,6 +58,10 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
     return true;
   });
   const buildTimeoutMinutes = positiveInteger(unity.buildTimeoutMinutes ?? 90, 'unity.buildTimeoutMinutes', errors);
+  const nugetForUnityRaw = requireObject(unity.nugetForUnity ?? unity.nuget_for_unity ?? {}, 'unity.nugetForUnity');
+  const nugetForUnityEnabled = booleanValue(nugetForUnityRaw.enabled ?? true, 'unity.nugetForUnity.enabled', errors);
+  const nugetRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.restoreTimeoutSeconds ?? nugetForUnityRaw.restore_timeout_seconds ?? 600, 'unity.nugetForUnity.restoreTimeoutSeconds', errors);
+  const nugetCliRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.cliRestoreTimeoutSeconds ?? nugetForUnityRaw.cli_restore_timeout_seconds ?? 300, 'unity.nugetForUnity.cliRestoreTimeoutSeconds', errors);
   const maxBytes = positiveInteger(artifacts.maxBytes ?? 1_000_000_000, 'artifacts.maxBytes', errors);
   const successfulRetentionDays = nonNegativeNumber(artifacts.successfulRetentionDays ?? 3, 'artifacts.successfulRetentionDays', errors);
   const failedRetentionDays = nonNegativeNumber(artifacts.failedRetentionDays ?? 1, 'artifacts.failedRetentionDays', errors);
@@ -83,7 +87,16 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
     dataDir,
     repositoryAccess: { defaultHost, allowedHosts, allowedBranchPatterns: branchPatterns, compiledBranchPatterns },
     sourceDependencies: { gitLfs: { enabled: gitLfsEnabled, mode: gitLfsMode, maxObjectBytes, maxTotalBytesPerJob, allowRepositoryLfsconfig, allowedEndpointHosts, endpointUrl }, submodules: { enabled: submodulesEnabled } },
-    unity: { editorsRoot, allowedBuildProfiles: buildProfiles, buildTimeoutMinutes },
+    unity: {
+      editorsRoot,
+      allowedBuildProfiles: buildProfiles,
+      buildTimeoutMinutes,
+      nugetForUnity: {
+        enabled: nugetForUnityEnabled,
+        restoreTimeoutSeconds: nugetRestoreTimeoutSeconds,
+        cliRestoreTimeoutSeconds: nugetCliRestoreTimeoutSeconds,
+      },
+    },
     artifacts: { maxBytes, successfulRetentionDays, failedRetentionDays, logsRetentionDays },
     runner: { pollIntervalMs, heartbeatIntervalMs, interruptedJobRetries, gitTimeoutSeconds, lfsRequestTimeoutSeconds },
     storage: { lfsObjects: { maxTotalBytes, retentionDays: lfsRetentionDays }, sourceSnapshots: { retentionDays: snapshotRetentionDays } },
