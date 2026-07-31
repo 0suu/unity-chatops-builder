@@ -5,12 +5,10 @@ import { validateBuildProfilePath } from './core/paths.js';
 const STATUS_KEYS = Array.from({ length: 10 }, (_, index) => String(index));
 const DEFAULT_MAX_LFS_OBJECT_BYTES = 10 * 1024 ** 3;
 const DEFAULT_MAX_LFS_TOTAL_BYTES_PER_JOB = 50 * 1024 ** 3;
-const DEFAULT_LFS_CACHE_MAX_BYTES = 300 * 1024 ** 3;
 
 export async function loadConfig(configPath) {
   const absolutePath = path.resolve(configPath);
-  const raw = JSON.parse(await readFile(absolutePath, 'utf8'));
-  return validateConfig(raw, path.dirname(absolutePath));
+  return validateConfig(JSON.parse(await readFile(absolutePath, 'utf8')), path.dirname(absolutePath));
 }
 
 export function validateConfig(raw, baseDirectory = process.cwd()) {
@@ -20,7 +18,9 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
     return value;
   };
   const root = requireObject(raw, 'config');
-  const repository = requireObject(root.repository, 'repository');
+  const repositoryAccess = requireObject(root.repositoryAccess ?? root.repository_access ?? {}, 'repositoryAccess');
+  const legacyRepository = root.repository && typeof root.repository === 'object' && !Array.isArray(root.repository) ? root.repository : {};
+  if (legacyRepository.alias || legacyRepository.sshUrl || legacyRepository.remote_url) errors.push('Fixed repository.alias/repository.sshUrl configuration was removed. Use repositoryAccess and specify repository in each chat request.');
   const unity = requireObject(root.unity, 'unity');
   const artifacts = requireObject(root.artifacts ?? {}, 'artifacts');
   const runner = requireObject(root.runner ?? {}, 'runner');
@@ -29,41 +29,39 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
   const discord = requireObject(root.discord ?? { enabled: false }, 'discord');
 
   const dataDir = resolvePath(root.dataDir, baseDirectory, 'dataDir', errors);
-  const alias = nonEmptyString(repository.alias, 'repository.alias', errors);
-  const sshUrl = nonEmptyString(repository.sshUrl ?? repository.remote_url, 'repository.sshUrl', errors);
-  const branchPatterns = stringArray(repository.allowedBranchPatterns ?? repository.allowed_branch_patterns, 'repository.allowedBranchPatterns', errors, { nonEmpty: true });
+  const defaultHost = hostname(repositoryAccess.defaultHost ?? repositoryAccess.default_host ?? 'github.com', 'repositoryAccess.defaultHost', errors);
+  const allowedHosts = hostnameArray(repositoryAccess.allowedHosts ?? repositoryAccess.allowed_hosts ?? [defaultHost], 'repositoryAccess.allowedHosts', errors);
+  if (defaultHost && !allowedHosts.includes(defaultHost)) errors.push('repositoryAccess.defaultHost must be included in repositoryAccess.allowedHosts.');
+  const branchPatterns = stringArray(repositoryAccess.allowedBranchPatterns ?? repositoryAccess.allowed_branch_patterns ?? ['.+'], 'repositoryAccess.allowedBranchPatterns', errors, { nonEmpty: true });
   const compiledBranchPatterns = [];
-  for (const pattern of branchPatterns) { try { compiledBranchPatterns.push(new RegExp(pattern)); } catch (error) { errors.push(`Invalid repository.allowedBranchPatterns entry ${JSON.stringify(pattern)}: ${error.message}`); } }
-  if (Object.hasOwn(repository, 'useGitLfs')) errors.push('repository.useGitLfs was removed. Configure repository.sourceDependencies.gitLfs instead.');
+  for (const pattern of branchPatterns) { try { compiledBranchPatterns.push(new RegExp(pattern)); } catch (error) { errors.push(`Invalid repositoryAccess.allowedBranchPatterns entry ${JSON.stringify(pattern)}: ${error.message}`); } }
 
-  const dependencies = requireObject(repository.sourceDependencies ?? repository.source_dependencies ?? {}, 'repository.sourceDependencies');
-  const gitLfsRaw = requireObject(dependencies.gitLfs ?? dependencies.git_lfs ?? {}, 'repository.sourceDependencies.gitLfs');
-  const submodulesRaw = requireObject(dependencies.submodules ?? {}, 'repository.sourceDependencies.submodules');
-  const gitLfsEnabled = booleanValue(gitLfsRaw.enabled ?? true, 'repository.sourceDependencies.gitLfs.enabled', errors);
+  const dependencies = requireObject(root.sourceDependencies ?? root.source_dependencies ?? legacyRepository.sourceDependencies ?? legacyRepository.source_dependencies ?? {}, 'sourceDependencies');
+  const gitLfsRaw = requireObject(dependencies.gitLfs ?? dependencies.git_lfs ?? {}, 'sourceDependencies.gitLfs');
+  const submodulesRaw = requireObject(dependencies.submodules ?? {}, 'sourceDependencies.submodules');
+  const gitLfsEnabled = booleanValue(gitLfsRaw.enabled ?? true, 'sourceDependencies.gitLfs.enabled', errors);
   const gitLfsMode = gitLfsRaw.mode ?? 'materialize_in_source_snapshot';
-  if (gitLfsMode !== 'materialize_in_source_snapshot') errors.push('repository.sourceDependencies.gitLfs.mode must be materialize_in_source_snapshot.');
-  const maxObjectBytes = positiveInteger(gitLfsRaw.maxObjectBytes ?? gitLfsRaw.max_object_bytes ?? DEFAULT_MAX_LFS_OBJECT_BYTES, 'repository.sourceDependencies.gitLfs.maxObjectBytes', errors);
-  const maxTotalBytesPerJob = positiveInteger(gitLfsRaw.maxTotalBytesPerJob ?? gitLfsRaw.max_total_bytes_per_job ?? DEFAULT_MAX_LFS_TOTAL_BYTES_PER_JOB, 'repository.sourceDependencies.gitLfs.maxTotalBytesPerJob', errors);
-  const allowRepositoryLfsconfig = booleanValue(gitLfsRaw.allowRepositoryLfsconfig ?? gitLfsRaw.allow_repository_lfsconfig ?? false, 'repository.sourceDependencies.gitLfs.allowRepositoryLfsconfig', errors);
-  const allowedEndpointHosts = hostnameArray(gitLfsRaw.allowedEndpointHosts ?? gitLfsRaw.allowed_endpoint_hosts ?? ['github.com', 'githubusercontent.com'], 'repository.sourceDependencies.gitLfs.allowedEndpointHosts', errors);
-  const endpointUrl = optionalHttpsUrl(gitLfsRaw.endpointUrl ?? gitLfsRaw.endpoint_url ?? null, 'repository.sourceDependencies.gitLfs.endpointUrl', allowedEndpointHosts, errors);
-  const submodulesEnabled = booleanValue(submodulesRaw.enabled ?? false, 'repository.sourceDependencies.submodules.enabled', errors);
-  if (submodulesEnabled) errors.push('repository.sourceDependencies.submodules.enabled=true is not supported by the initial release.');
+  if (gitLfsMode !== 'materialize_in_source_snapshot') errors.push('sourceDependencies.gitLfs.mode must be materialize_in_source_snapshot.');
+  const maxObjectBytes = positiveInteger(gitLfsRaw.maxObjectBytes ?? gitLfsRaw.max_object_bytes ?? DEFAULT_MAX_LFS_OBJECT_BYTES, 'sourceDependencies.gitLfs.maxObjectBytes', errors);
+  const maxTotalBytesPerJob = positiveInteger(gitLfsRaw.maxTotalBytesPerJob ?? gitLfsRaw.max_total_bytes_per_job ?? DEFAULT_MAX_LFS_TOTAL_BYTES_PER_JOB, 'sourceDependencies.gitLfs.maxTotalBytesPerJob', errors);
+  const allowRepositoryLfsconfig = booleanValue(gitLfsRaw.allowRepositoryLfsconfig ?? gitLfsRaw.allow_repository_lfsconfig ?? false, 'sourceDependencies.gitLfs.allowRepositoryLfsconfig', errors);
+  const allowedEndpointHosts = hostnameArray(gitLfsRaw.allowedEndpointHosts ?? gitLfsRaw.allowed_endpoint_hosts ?? ['github.com', 'githubusercontent.com'], 'sourceDependencies.gitLfs.allowedEndpointHosts', errors);
+  const endpointUrl = optionalHttpsUrl(gitLfsRaw.endpointUrl ?? gitLfsRaw.endpoint_url ?? null, 'sourceDependencies.gitLfs.endpointUrl', allowedEndpointHosts, errors);
+  const submodulesEnabled = booleanValue(submodulesRaw.enabled ?? false, 'sourceDependencies.submodules.enabled', errors);
+  if (submodulesEnabled) errors.push('sourceDependencies.submodules.enabled=true is not supported by the initial release.');
 
   const editorsRoot = resolvePath(unity.editorsRoot ?? '/Applications/Unity/Hub/Editor', baseDirectory, 'unity.editorsRoot', errors);
-  const configuredBuildProfiles = stringArray(unity.allowedBuildProfiles, 'unity.allowedBuildProfiles', errors, { nonEmpty: true });
+  const configuredBuildProfiles = stringArray(unity.allowedBuildProfiles ?? [], 'unity.allowedBuildProfiles', errors);
   const buildProfiles = configuredBuildProfiles.filter((profile) => {
     const result = validateBuildProfilePath(profile);
     if (!result.ok) { errors.push(`Invalid unity.allowedBuildProfiles entry ${JSON.stringify(profile)}: ${result.reason}`); return false; }
     return true;
   });
   const buildTimeoutMinutes = positiveInteger(unity.buildTimeoutMinutes ?? 90, 'unity.buildTimeoutMinutes', errors);
-
   const maxBytes = positiveInteger(artifacts.maxBytes ?? 1_000_000_000, 'artifacts.maxBytes', errors);
   const successfulRetentionDays = nonNegativeNumber(artifacts.successfulRetentionDays ?? 3, 'artifacts.successfulRetentionDays', errors);
   const failedRetentionDays = nonNegativeNumber(artifacts.failedRetentionDays ?? 1, 'artifacts.failedRetentionDays', errors);
   const logsRetentionDays = nonNegativeNumber(artifacts.logsRetentionDays ?? 14, 'artifacts.logsRetentionDays', errors);
-
   const pollIntervalMs = positiveInteger(runner.pollIntervalMs ?? 2_000, 'runner.pollIntervalMs', errors);
   const heartbeatIntervalMs = positiveInteger(runner.heartbeatIntervalMs ?? 15_000, 'runner.heartbeatIntervalMs', errors);
   const interruptedJobRetries = nonNegativeInteger(runner.interruptedJobRetries ?? 1, 'runner.interruptedJobRetries', errors);
@@ -71,10 +69,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
   const lfsRequestTimeoutSeconds = positiveInteger(runner.lfsRequestTimeoutSeconds ?? runner.lfs_request_timeout_seconds ?? 600, 'runner.lfsRequestTimeoutSeconds', errors);
 
   const lfsObjectsRaw = requireObject(storage.lfsObjects ?? storage.lfs_objects ?? {}, 'storage.lfsObjects');
-  const maxTotalBytes = positiveInteger(
-    lfsObjectsRaw.maxTotalBytes ?? lfsObjectsRaw.max_total_bytes ?? gbToBytes(lfsObjectsRaw.maxTotalGb ?? lfsObjectsRaw.max_total_gb ?? 300, 'storage.lfsObjects.maxTotalGb', errors),
-    'storage.lfsObjects.maxTotalBytes', errors,
-  );
+  const maxTotalBytes = positiveInteger(lfsObjectsRaw.maxTotalBytes ?? lfsObjectsRaw.max_total_bytes ?? gbToBytes(lfsObjectsRaw.maxTotalGb ?? lfsObjectsRaw.max_total_gb ?? 300, 'storage.lfsObjects.maxTotalGb', errors), 'storage.lfsObjects.maxTotalBytes', errors);
   const lfsRetentionDays = nonNegativeNumber(lfsObjectsRaw.retentionDays ?? lfsObjectsRaw.retention_days ?? 60, 'storage.lfsObjects.retentionDays', errors);
   const snapshotRaw = requireObject(storage.sourceSnapshots ?? storage.source_snapshots ?? {}, 'storage.sourceSnapshots');
   const snapshotRetentionDays = nonNegativeNumber(snapshotRaw.retentionDays ?? snapshotRaw.retention_days ?? 60, 'storage.sourceSnapshots.retentionDays', errors);
@@ -86,13 +81,8 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
 
   return {
     dataDir,
-    repository: {
-      alias, sshUrl, allowedBranchPatterns: branchPatterns, compiledBranchPatterns,
-      sourceDependencies: {
-        gitLfs: { enabled: gitLfsEnabled, mode: gitLfsMode, maxObjectBytes, maxTotalBytesPerJob, allowRepositoryLfsconfig, allowedEndpointHosts, endpointUrl },
-        submodules: { enabled: submodulesEnabled },
-      },
-    },
+    repositoryAccess: { defaultHost, allowedHosts, allowedBranchPatterns: branchPatterns, compiledBranchPatterns },
+    sourceDependencies: { gitLfs: { enabled: gitLfsEnabled, mode: gitLfsMode, maxObjectBytes, maxTotalBytesPerJob, allowRepositoryLfsconfig, allowedEndpointHosts, endpointUrl }, submodules: { enabled: submodulesEnabled } },
     unity: { editorsRoot, allowedBuildProfiles: buildProfiles, buildTimeoutMinutes },
     artifacts: { maxBytes, successfulRetentionDays, failedRetentionDays, logsRetentionDays },
     runner: { pollIntervalMs, heartbeatIntervalMs, interruptedJobRetries, gitTimeoutSeconds, lfsRequestTimeoutSeconds },
@@ -107,17 +97,7 @@ function validateSlack(value, globalMaxBytes, errors, baseDirectory) {
   const statusEmojiNames = validateStatusMap(value.statusEmojiNames, 'slack.statusEmojiNames', errors);
   const failureEmojiName = nonEmptyString(value.failureEmojiName ?? 'x', 'slack.failureEmojiName', errors);
   validateUniqueStatuses(statusEmojiNames, failureEmojiName, 'slack', errors);
-  return {
-    enabled,
-    workspaceId: nonEmptyString(value.workspaceId, 'slack.workspaceId', errors),
-    botToken: validateSecretReference(value.botToken, 'slack.botToken', errors, baseDirectory),
-    appToken: validateSecretReference(value.appToken, 'slack.appToken', errors, baseDirectory),
-    allowedChannelIds: stringArray(value.allowedChannelIds, 'slack.allowedChannelIds', errors, { nonEmpty: true }),
-    allowedUserIds: stringArray(value.allowedUserIds, 'slack.allowedUserIds', errors, { nonEmpty: true }),
-    nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? globalMaxBytes, 'slack.nativeUploadLimitBytes', errors),
-    statusEmojiNames,
-    failureEmojiName,
-  };
+  return { enabled, workspaceId: nonEmptyString(value.workspaceId, 'slack.workspaceId', errors), botToken: validateSecretReference(value.botToken, 'slack.botToken', errors, baseDirectory), appToken: validateSecretReference(value.appToken, 'slack.appToken', errors, baseDirectory), allowedChannelIds: stringArray(value.allowedChannelIds, 'slack.allowedChannelIds', errors, { nonEmpty: true }), allowedUserIds: stringArray(value.allowedUserIds, 'slack.allowedUserIds', errors, { nonEmpty: true }), nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? globalMaxBytes, 'slack.nativeUploadLimitBytes', errors), statusEmojiNames, failureEmojiName };
 }
 function validateDiscord(value, errors, baseDirectory) {
   const enabled = Boolean(value.enabled); if (!enabled) return { enabled: false };
@@ -128,25 +108,17 @@ function validateDiscord(value, errors, baseDirectory) {
   for (const [stage, id] of Object.entries(statusEmojiIds)) if (id && !/^\d{15,22}$/.test(id)) errors.push(`discord.statusEmojiIds.${stage} must be a Discord custom emoji ID.`);
   const failureEmoji = nonEmptyString(value.failureEmoji ?? '❌', 'discord.failureEmoji', errors);
   validateUniqueStatuses(statusEmojiIds, failureEmoji, 'discord', errors);
-  return {
-    enabled,
-    guildId: nonEmptyString(value.guildId, 'discord.guildId', errors),
-    token: validateSecretReference(value.token, 'discord.token', errors, baseDirectory),
-    allowedChannelIds: stringArray(value.allowedChannelIds, 'discord.allowedChannelIds', errors, { nonEmpty: true }),
-    allowedUserIds, allowedRoleIds,
-    nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? 10 * 1024 * 1024, 'discord.nativeUploadLimitBytes', errors),
-    statusEmojiIds, failureEmoji,
-    threadAutoArchiveMinutes: discordArchiveDuration(value.threadAutoArchiveMinutes ?? 1440, errors),
-  };
+  return { enabled, guildId: nonEmptyString(value.guildId, 'discord.guildId', errors), token: validateSecretReference(value.token, 'discord.token', errors, baseDirectory), allowedChannelIds: stringArray(value.allowedChannelIds, 'discord.allowedChannelIds', errors, { nonEmpty: true }), allowedUserIds, allowedRoleIds, nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? 10 * 1024 * 1024, 'discord.nativeUploadLimitBytes', errors), statusEmojiIds, failureEmoji, threadAutoArchiveMinutes: discordArchiveDuration(value.threadAutoArchiveMinutes ?? 1440, errors) };
 }
 function validateStatusMap(value, name, errors) { const map = value && typeof value === 'object' && !Array.isArray(value) ? value : {}; if (map !== value) errors.push(`${name} must be an object.`); return Object.fromEntries(STATUS_KEYS.map((key) => [key, nonEmptyString(map[key], `${name}.${key}`, errors)])); }
 function validateUniqueStatuses(map, failure, name, errors) { const values = Object.values(map).filter(Boolean); if (new Set(values).size !== values.length) errors.push(`${name} status emojis must be unique.`); if (values.includes(failure)) errors.push(`${name} failure emoji must differ from status emojis.`); }
 function validateSecretReference(value, name, errors, baseDirectory) { if (!value || typeof value !== 'object' || Array.isArray(value)) { errors.push(`${name} must be an object with env or file.`); return {}; } const hasEnv = typeof value.env === 'string' && value.env.length; const hasFile = typeof value.file === 'string' && value.file.length; if (Boolean(hasEnv) === Boolean(hasFile)) { errors.push(`${name} must specify exactly one of env or file.`); return {}; } return hasEnv ? { env: value.env } : { file: path.resolve(baseDirectory, value.file) }; }
-function resolvePath(value, base, name, errors) { const s = nonEmptyString(value, name, errors); return s ? path.resolve(base, s) : ''; }
+function resolvePath(value, base, name, errors) { const text = nonEmptyString(value, name, errors); return text ? path.resolve(base, text) : ''; }
 function nonEmptyString(value, name, errors) { if (typeof value !== 'string' || !value.trim()) { errors.push(`${name} must be a non-empty string.`); return ''; } return value.trim(); }
 function stringArray(value, name, errors, { nonEmpty = false } = {}) { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) { errors.push(`${name} must be an array of non-empty strings.`); return []; } const result = [...new Set(value.map((item) => item.trim()))]; if (nonEmpty && !result.length) errors.push(`${name} must not be empty.`); return result; }
-function hostnameArray(value, name, errors) { const values = stringArray(value, name, errors, { nonEmpty: true }); return values.filter((host) => { if (!/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/.test(host)) { errors.push(`${name} contains invalid hostname ${JSON.stringify(host)}.`); return false; } return true; }).map((host) => host.toLowerCase()); }
-function optionalHttpsUrl(value, name, hosts, errors) { if (value === null || value === undefined || value === '') return null; if (typeof value !== 'string') { errors.push(`${name} must be an HTTPS URL.`); return null; } try { const url = new URL(value); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || (url.port && url.port !== '443') || !hosts.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`))) errors.push(`${name} must be HTTPS, contain no credentials/query/fragment, and match allowedEndpointHosts.`); return value; } catch { errors.push(`${name} must be an HTTPS URL.`); return null; } }
+function hostname(value, name, errors) { if (typeof value !== 'string' || !/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$/.test(value)) { errors.push(`${name} must be a valid hostname.`); return ''; } return value.toLowerCase(); }
+function hostnameArray(value, name, errors) { return stringArray(value, name, errors, { nonEmpty: true }).map((host, index) => hostname(host, `${name}.${index}`, errors)).filter(Boolean); }
+function optionalHttpsUrl(value, name, hosts, errors) { if (value === null || value === undefined || value === '') return null; if (typeof value !== 'string') { errors.push(`${name} must be an HTTPS URL.`); return null; } try { const url = new URL(value); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || (url.port && url.port !== '443') || !hosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) errors.push(`${name} must be HTTPS, contain no credentials/query/fragment, and match allowedEndpointHosts.`); return value; } catch { errors.push(`${name} must be an HTTPS URL.`); return null; } }
 function booleanValue(value, name, errors) { if (typeof value !== 'boolean') { errors.push(`${name} must be a boolean.`); return false; } return value; }
 function positiveInteger(value, name, errors) { if (!Number.isSafeInteger(value) || value <= 0) { errors.push(`${name} must be a positive safe integer.`); return 1; } return value; }
 function nonNegativeInteger(value, name, errors) { if (!Number.isInteger(value) || value < 0) { errors.push(`${name} must be a non-negative integer.`); return 0; } return value; }

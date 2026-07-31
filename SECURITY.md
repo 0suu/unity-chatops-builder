@@ -2,41 +2,45 @@
 
 ## Trust model
 
-許可されたbranchのUnity Editor codeはRunner user権限で実行され得る。対象Repositoryと要求者は信頼境界内である必要がある。
+チャット要求からRepositoryを選択できますが、未信頼コードを安全に実行するsandboxではありません。指定branchのUnity Editor script、Package、build hookはRunner user権限で実行され得ます。要求者と対象Repositoryの両方を信頼境界内に置いてください。
+
+## Dynamic Repository selection
+
+Repository入力は次の順序で処理します。
+
+1. `owner/repository`または対応するGitHub URLとして解析
+2. `repositoryAccess.allowedHosts`と一致するhostだけを許可
+3. URL内credential、query、fragment、非SSH/HTTPS schemeを拒否
+4. 認証情報を含まないSSH URLへ正規化
+5. Coordinator userのSSH資格情報でclone/fetch
+6. refをimmutable Commit SHAへ固定
+7. `.git`を含まないSource SnapshotをWorkerへ渡す
+
+「SSH accountがアクセスできるRepository」はビルド可能ですが、「任意hostへSSH接続できる」という意味にはしません。任意host入力は内部network探索やcredential送信につながるため、host allowlistを必須とします。
 
 ## Coordinator / Worker boundary
 
-Coordinator配下の`RepositorySourceResolver`だけが次を利用できる。
-
-- Repository読み取りcredential
-- SSH Agent
-- Git credential helper
-- GitHub Token
-- Git LFS Authorization Header
-- LFS用一時credential
-- LFS network access
-
-Workerへ渡す入力は、検証済みread-only Source SnapshotのIDとBuild Requestだけである。Worker processにはGit/LFS credentialを継承させず、Workspaceに`.git`、`.lfsconfig`由来credential、Git configを含めない。
+CoordinatorだけがRepository読み取りcredential、SSH Agent、Git credential helper、GitHub Token、LFS Authorization Header、Git/LFS network accessを利用します。Worker processへこれらを継承させず、Workspaceへ`.git`やGit configを含めません。
 
 ## Git LFS
 
-- LFS pointerのversion、OID SHA-256、sizeをstrictに検証する。
-- objectは一時fileへdownloadし、size/hash検証後だけatomic renameでcacheへ公開する。
-- hash/size mismatch objectをWorkspaceへ渡さない。
-- `.lfsconfig`は既定で拒否する。
-- LFS endpoint、object URL、redirect URLはHTTPS、host allowlist、private address rejectionを通す。
-- URL内credentialを拒否する。
-- cross-origin redirectではAuthorization、Cookie、Proxy-Authorizationを転送しない。
-- Snapshot公開完了まではProtection LeaseでobjectをGCから保護する。
+- pointerのversion、OID SHA-256、sizeをstrictに検証
+- 一時fileのsize/hash検証後だけatomic renameでcacheへ公開
+- hash/size mismatch objectをWorkspaceへ渡さない
+- `.lfsconfig`は既定拒否
+- endpoint、object URL、redirect URLをHTTPS、host allowlist、private address rejectionへ通す
+- URL内credentialを拒否
+- cross-origin redirectでAuthorization等を転送しない
+- Snapshot公開完了までProtection LeaseでGCから保護
 
 ## Recommended deployment
 
-- 専用macOS user
-- read-only GitHub Deploy Key
-- allowlisted channel/user/role/branch/profile
-- unnecessary personal/corporate credentialをRunnerへ置かない
+- Coordinator／Worker専用macOS user
+- ビルド用途に限定したread-only SSH credential
+- 許可channel、user、roleのallowlist
+- 必要なGit hostだけの`repositoryAccess.allowedHosts`
+- 未信頼Forkや第三者Repositoryを実行しない
 - Runner userに管理者権限を与えない
-- Artifactとlogのretentionを設定する
-- OS update、Node.js、Unity versionを管理する
+- OSまたはnetwork側でもoutbound connectionを制限する
 
-Security issueには、影響範囲、再現条件、対象commit、logのsecret除去済み抜粋を含めること。公開Issueへtokenやprivate URLを投稿しないこと。
+公開Issueへtoken、private URL、SSH情報を投稿しないでください。

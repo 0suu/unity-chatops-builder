@@ -4,6 +4,7 @@ import { CiError, asCiError } from '../core/errors.js';
 import { STAGES } from '../core/stages.js';
 import { codeBlock, formatBytes, shortSha } from '../utils/format.js';
 import { messageReference, threadReference } from './status-service.js';
+import { normalizeRepositoryReference } from '../source/repository-reference.js';
 
 export class BuildCoordinator {
   constructor({ config, store, adapters, statusService, sourceResolver, logger, onQueued }) {
@@ -14,9 +15,11 @@ export class BuildCoordinator {
   async handleIncomingMessage(message) {
     const parsed = parseBuildRequest(message.text);
     if (!parsed.recognized) return;
+    const repository = normalizeRepositoryReference(parsed.value?.repository, { defaultHost: this.config.repositoryAccess.defaultHost, allowedHosts: this.config.repositoryAccess.allowedHosts });
+    const repositoryIdentity = repository.ok ? repository.value.id : parsed.value?.repository ?? 'invalid-repository';
     const { created, job: initialJob } = this.store.createJob({
       platform: message.platform, workspaceId: message.workspaceId, channelId: message.channelId, sourceMessageId: message.sourceMessageId,
-      requesterId: message.requesterId, requesterName: message.requesterName, repositoryAlias: this.config.repository.alias,
+      requesterId: message.requesterId, requesterName: message.requesterName, repositoryAlias: repositoryIdentity,
       requestedBranch: parsed.value?.branch ?? null, buildProfilePath: parsed.value?.profile ?? null,
     });
     if (!created) { this.logger?.debug('Duplicate chat event ignored.', { jobId: initialJob?.id }); return; }
@@ -24,7 +27,7 @@ export class BuildCoordinator {
     await this.statusService.setStage(initialJob.id, STAGES.AUTHORIZING);
     let job = initialJob;
     try {
-      const thread = await adapter.createThread(messageReference(job), { jobId: job.id, branch: parsed.value?.branch });
+      const thread = await adapter.createThread(messageReference(job), { jobId: job.id, repository: parsed.value?.repository, branch: parsed.value?.branch });
       this.store.setThread(job.id, thread.threadId); job = this.store.getJob(job.id);
     } catch (error) {
       await this.#reject(job, asCiError(error, { code: 'THREAD_CREATE_FAILED', category: 'REQUEST_ERROR', message: '結果返信用のスレッドを作成できませんでした。', stage: STAGES.AUTHORIZING }));
@@ -32,24 +35,26 @@ export class BuildCoordinator {
     }
 
     try {
-      this.#validateRequest(parsed);
+      const profilePath = this.#validateRequest(parsed, repository);
       await this.sourceResolver.validateBranchName(parsed.value.branch);
       await this.statusService.setStage(job.id, STAGES.RESOLVING_SOURCE);
-      const resolved = await this.sourceResolver.resolve({ requestedRef: parsed.value.branch });
-      this.store.setResolvedSource(job.id, resolved);
-      job = this.store.getJob(job.id);
+      const resolved = await this.sourceResolver.resolve({ repository: repository.value, requestedRef: parsed.value.branch });
+      this.store.setResolvedSource(job.id, resolved); job = this.store.getJob(job.id);
       await this.#postThreadSafely(job, [
-        `Sourceを解決しました。`,
+        'Sourceを解決しました。',
+        `Repository: \`${repository.value.displayName}\``,
         `Commit: \`${shortSha(resolved.commitSha)}\``,
         `Snapshot: \`${resolved.sourceSnapshotId}\``,
         `LFS: ${resolved.sourceSnapshotManifest.lfs.objectCount} files / ${formatBytes(resolved.sourceSnapshotManifest.lfs.totalSizeBytes)}`,
       ].join('\n'));
       const queuePosition = this.store.setQueued(job.id);
-      await this.statusService.setStage(job.id, STAGES.WAITING_FOR_WORKER);
-      job = this.store.getJob(job.id);
+      await this.statusService.setStage(job.id, STAGES.WAITING_FOR_WORKER); job = this.store.getJob(job.id);
       await this.#postThreadSafely(job, [
         `Build \`${job.id}\` を受け付けました。`, '',
-        `Branch: \`${job.requestedBranch}\``, `Profile: \`${job.buildProfilePath}\``, `Queue: ${queuePosition}番目`,
+        `Repository: \`${repository.value.displayName}\``,
+        `Branch: \`${job.requestedBranch}\``,
+        `Profile: \`${profilePath}\``,
+        `Queue: ${queuePosition}番目`,
       ].join('\n'));
       this.onQueued?.();
     } catch (error) {
@@ -57,12 +62,14 @@ export class BuildCoordinator {
     }
   }
 
-  #validateRequest(parsed) {
+  #validateRequest(parsed, repository) {
     if (parsed.errors?.length) throw new CiError({ code: 'INVALID_REQUEST_FORMAT', category: 'REQUEST_ERROR', message: 'ビルド要求の形式が正しくありません。', stage: STAGES.AUTHORIZING, details: { errors: parsed.errors } });
+    if (!repository.ok) throw new CiError({ code: 'INVALID_REPOSITORY', category: 'REQUEST_ERROR', message: repository.reason, stage: STAGES.AUTHORIZING });
     const profile = validateBuildProfilePath(parsed.value.profile);
     if (!profile.ok) throw new CiError({ code: 'INVALID_BUILD_PROFILE_PATH', category: 'REQUEST_ERROR', message: profile.reason, stage: STAGES.AUTHORIZING });
-    if (!this.config.unity.allowedBuildProfiles.includes(profile.value)) throw new CiError({ code: 'BUILD_PROFILE_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたBuild Profileは許可リストにありません。', stage: STAGES.AUTHORIZING });
-    if (!this.config.repository.compiledBranchPatterns.some((pattern) => pattern.test(parsed.value.branch))) throw new CiError({ code: 'BRANCH_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたブランチ名は許可パターンに一致しません。', stage: STAGES.AUTHORIZING });
+    if (this.config.unity.allowedBuildProfiles.length > 0 && !this.config.unity.allowedBuildProfiles.includes(profile.value)) throw new CiError({ code: 'BUILD_PROFILE_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたBuild Profileは許可リストにありません。', stage: STAGES.AUTHORIZING });
+    if (!this.config.repositoryAccess.compiledBranchPatterns.some((pattern) => pattern.test(parsed.value.branch))) throw new CiError({ code: 'BRANCH_NOT_ALLOWED', category: 'REQUEST_ERROR', message: '指定されたブランチ名は許可パターンに一致しません。', stage: STAGES.AUTHORIZING });
+    return profile.value;
   }
 
   async #reject(job, error) {

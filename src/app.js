@@ -29,8 +29,7 @@ export class Application {
   }
 
   async start() {
-    await mkdir(this.config.dataDir, { recursive: true });
-    await this.lock.acquire();
+    await mkdir(this.config.dataDir, { recursive: true }); await this.lock.acquire();
     try {
       this.store = new JobStore(path.join(this.config.dataDir, 'jobs.sqlite3'), { logger: this.logger });
       const adapters = [];
@@ -48,14 +47,11 @@ export class Application {
       this.adapters = new AdapterRegistry(adapters);
       const statusService = new StatusService({ store: this.store, adapters: this.adapters, logger: this.logger });
 
-      const lfsPolicy = this.config.repository.sourceDependencies.gitLfs;
+      const lfsPolicy = this.config.sourceDependencies.gitLfs;
       const endpointPolicy = new LfsEndpointPolicy({ allowedHosts: lfsPolicy.allowedEndpointHosts, allowRepositoryLfsconfig: lfsPolicy.allowRepositoryLfsconfig });
       const authProvider = new LfsAuthProvider({ runProcess, endpointPolicy, logger: this.logger });
       const lfsClient = new GitLfsClient({ endpointPolicy, authProvider, timeoutMs: this.config.runner.lfsRequestTimeoutSeconds * 1000 });
-      const lfsObjectCache = new LfsObjectCache({
-        root: path.join(this.config.dataDir, 'lfs-objects'), maxObjectBytes: lfsPolicy.maxObjectBytes, maxTotalBytesPerJob: lfsPolicy.maxTotalBytesPerJob,
-        maxCacheBytes: this.config.storage.lfsObjects.maxTotalBytes, retentionDays: this.config.storage.lfsObjects.retentionDays, logger: this.logger,
-      });
+      const lfsObjectCache = new LfsObjectCache({ root: path.join(this.config.dataDir, 'lfs-objects'), maxObjectBytes: lfsPolicy.maxObjectBytes, maxTotalBytesPerJob: lfsPolicy.maxTotalBytesPerJob, maxCacheBytes: this.config.storage.lfsObjects.maxTotalBytes, retentionDays: this.config.storage.lfsObjects.retentionDays, logger: this.logger });
       const snapshotStore = new SourceSnapshotStore({ root: path.join(this.config.dataDir, 'source-snapshots'), workspaceRoot: path.join(this.config.dataDir, 'workspaces'), logger: this.logger });
       const sourceResolver = new RepositorySourceResolver({ config: this.config, dataDir: this.config.dataDir, logger: this.logger, endpointPolicy, lfsObjectCache, lfsClient, snapshotStore });
 
@@ -68,15 +64,11 @@ export class Application {
 
       const recovery = this.store.recoverInterruptedJobs(this.config.runner.interruptedJobRetries);
       if (recovery.length) this.logger.warn('Recovered interrupted jobs.', { recovery });
-      for (const adapter of this.adapters.values()) {
-        try { await adapter.start(); this.startedAdapters.push(adapter); }
-        catch (error) { try { await adapter.stop(); } catch {} throw error; }
-      }
+      for (const adapter of this.adapters.values()) { try { await adapter.start(); this.startedAdapters.push(adapter); } catch (error) { try { await adapter.stop(); } catch {} throw error; } }
       await statusService.reconcile();
       this.retention = new RetentionService({ config: this.config, dataDir: this.config.dataDir, store: this.store, snapshotStore, lfsObjectCache, logger: this.logger });
-      await this.retention.start();
-      this.worker.start(); this.worker.wake(); this.started = true;
-      this.logger.info('unity-chatops-builder started.', { dataDir: this.config.dataDir, platforms: this.adapters.values().map((adapter) => adapter.platform) });
+      await this.retention.start(); this.worker.start(); this.worker.wake(); this.started = true;
+      this.logger.info('unity-chatops-builder started.', { dataDir: this.config.dataDir, platforms: this.adapters.values().map((adapter) => adapter.platform), repositoryHosts: this.config.repositoryAccess.allowedHosts });
     } catch (error) { await this.stop(); throw error; }
   }
 

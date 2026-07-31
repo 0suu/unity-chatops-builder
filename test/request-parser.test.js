@@ -2,31 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseBuildRequest } from '../src/core/request-parser.js';
 
-test('parses a valid build request', () => {
+test('parses repository, branch, and build profile', () => {
   assert.deepEqual(parseBuildRequest(`
     unity-build
+    repository: 0suu/unity-project
     branch: suu/feature/example
     profile: Assets/BuildProfiles/PICO-Development.asset
-  `), {
-    recognized: true,
-    value: {
-      branch: 'suu/feature/example',
-      profile: 'Assets/BuildProfiles/PICO-Development.asset',
-    },
-  });
+  `), { recognized: true, value: { repository: '0suu/unity-project', branch: 'suu/feature/example', profile: 'Assets/BuildProfiles/PICO-Development.asset' } });
 });
-
-test('ignores unrelated messages', () => {
-  assert.deepEqual(parseBuildRequest('hello'), { recognized: false });
-});
-
-test('rejects duplicate and unknown keys', () => {
-  const result = parseBuildRequest(`unity-build
-branch: main
-branch: other
-profile: Assets/Profile.asset
-repo: arbitrary`);
-  assert.equal(result.recognized, true);
-  assert.match(result.errors.join('\n'), /Duplicate key: branch/);
-  assert.match(result.errors.join('\n'), /Unknown key: repo/);
-});
+test('accepts repo as a shorthand alias', () => { assert.equal(parseBuildRequest('unity-build\nrepo: 0suu/project\nbranch: main\nprofile: Assets/P.asset').value.repository, '0suu/project'); });
+test('ignores unrelated messages', () => { assert.deepEqual(parseBuildRequest('hello'), { recognized: false }); });
+test('rejects duplicate repository aliases and missing fields', () => { const result = parseBuildRequest('unity-build\nrepository: 0suu/a\nrepo: 0suu/b\nbranch: main'); assert.match(result.errors.join('\n'), /Duplicate key: repository/); assert.match(result.errors.join('\n'), /Missing key: profile/); });

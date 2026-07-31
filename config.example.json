@@ -1,34 +1,25 @@
 {
   "dataDir": "/Users/unity-ci/Library/Application Support/unity-chatops-builder",
-  "repository": {
-    "alias": "my-unity-project",
-    "sshUrl": "git@github.com:example/my-unity-project.git",
-    "allowedBranchPatterns": [
-      "^(suu|feature|fix|release)/.+$"
-    ],
-    "sourceDependencies": {
-      "gitLfs": {
-        "enabled": true,
-        "mode": "materialize_in_source_snapshot",
-        "maxObjectBytes": 10737418240,
-        "maxTotalBytesPerJob": 53687091200,
-        "allowRepositoryLfsconfig": false,
-        "allowedEndpointHosts": [
-          "github.com",
-          "githubusercontent.com"
-        ]
-      },
-      "submodules": {
-        "enabled": false
-      }
-    }
+  "repositoryAccess": {
+    "defaultHost": "github.com",
+    "allowedHosts": ["github.com"],
+    "allowedBranchPatterns": [".+"]
+  },
+  "sourceDependencies": {
+    "gitLfs": {
+      "enabled": true,
+      "mode": "materialize_in_source_snapshot",
+      "maxObjectBytes": 10737418240,
+      "maxTotalBytesPerJob": 53687091200,
+      "allowRepositoryLfsconfig": false,
+      "allowedEndpointHosts": ["github.com", "githubusercontent.com"]
+    },
+    "submodules": { "enabled": false }
   },
   "unity": {
     "editorsRoot": "/Applications/Unity/Hub/Editor",
     "buildTimeoutMinutes": 90,
-    "allowedBuildProfiles": [
-      "Assets/BuildProfiles/PICO-Development.asset"
-    ]
+    "allowedBuildProfiles": []
   },
   "artifacts": {
     "maxBytes": 1000000000,
@@ -37,13 +28,8 @@
     "logsRetentionDays": 14
   },
   "storage": {
-    "lfsObjects": {
-      "maxTotalGb": 300,
-      "retentionDays": 60
-    },
-    "sourceSnapshots": {
-      "retentionDays": 60
-    }
+    "lfsObjects": { "maxTotalGb": 300, "retentionDays": 60 },
+    "sourceSnapshots": { "retentionDays": 60 }
   },
   "runner": {
     "pollIntervalMs": 2000,
@@ -55,59 +41,23 @@
   "slack": {
     "enabled": false,
     "workspaceId": "T00000000",
-    "botToken": {
-      "file": "/Users/unity-ci/.config/unity-chatops-builder/slack-bot-token"
-    },
-    "appToken": {
-      "file": "/Users/unity-ci/.config/unity-chatops-builder/slack-app-token"
-    },
-    "allowedChannelIds": [
-      "C00000000"
-    ],
-    "allowedUserIds": [
-      "U00000000"
-    ],
+    "botToken": { "file": "/Users/unity-ci/.config/unity-chatops-builder/slack-bot-token" },
+    "appToken": { "file": "/Users/unity-ci/.config/unity-chatops-builder/slack-app-token" },
+    "allowedChannelIds": ["C00000000"],
+    "allowedUserIds": ["U00000000"],
     "nativeUploadLimitBytes": 1000000000,
-    "statusEmojiNames": {
-      "0": "unity_ci_0",
-      "1": "unity_ci_1",
-      "2": "unity_ci_2",
-      "3": "unity_ci_3",
-      "4": "unity_ci_4",
-      "5": "unity_ci_5",
-      "6": "unity_ci_6",
-      "7": "unity_ci_7",
-      "8": "unity_ci_8",
-      "9": "unity_ci_9"
-    },
+    "statusEmojiNames": { "0": "unity_ci_0", "1": "unity_ci_1", "2": "unity_ci_2", "3": "unity_ci_3", "4": "unity_ci_4", "5": "unity_ci_5", "6": "unity_ci_6", "7": "unity_ci_7", "8": "unity_ci_8", "9": "unity_ci_9" },
     "failureEmojiName": "x"
   },
   "discord": {
     "enabled": false,
     "guildId": "000000000000000000",
-    "token": {
-      "file": "/Users/unity-ci/.config/unity-chatops-builder/discord-bot-token"
-    },
-    "allowedChannelIds": [
-      "000000000000000000"
-    ],
-    "allowedUserIds": [
-      "000000000000000000"
-    ],
+    "token": { "file": "/Users/unity-ci/.config/unity-chatops-builder/discord-bot-token" },
+    "allowedChannelIds": ["000000000000000000"],
+    "allowedUserIds": ["000000000000000000"],
     "allowedRoleIds": [],
     "nativeUploadLimitBytes": 10485760,
-    "statusEmojiIds": {
-      "0": "000000000000000000",
-      "1": "000000000000000001",
-      "2": "000000000000000002",
-      "3": "000000000000000003",
-      "4": "000000000000000004",
-      "5": "000000000000000005",
-      "6": "000000000000000006",
-      "7": "000000000000000007",
-      "8": "000000000000000008",
-      "9": "000000000000000009"
-    },
+    "statusEmojiIds": { "0": "000000000000000000", "1": "000000000000000001", "2": "000000000000000002", "3": "000000000000000003", "4": "000000000000000004", "5": "000000000000000005", "6": "000000000000000006", "7": "000000000000000007", "8": "000000000000000008", "9": "000000000000000009" },
     "failureEmoji": "❌",
     "threadAutoArchiveMinutes": 1440
   }

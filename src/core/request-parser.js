@@ -1,4 +1,10 @@
-const ALLOWED_KEYS = new Set(['branch', 'profile']);
+const KEY_ALIASES = new Map([
+  ['repository', 'repository'],
+  ['repo', 'repository'],
+  ['branch', 'branch'],
+  ['profile', 'profile'],
+]);
+const REQUIRED_KEYS = ['repository', 'branch', 'profile'];
 
 export function parseBuildRequest(text) {
   if (typeof text !== 'string') return { recognized: false };
@@ -30,11 +36,12 @@ export function parseBuildRequest(text) {
       continue;
     }
 
-    const key = line.slice(0, separator).trim().toLowerCase();
+    const inputKey = line.slice(0, separator).trim().toLowerCase();
+    const key = KEY_ALIASES.get(inputKey);
     const value = line.slice(separator + 1).trim();
 
-    if (!ALLOWED_KEYS.has(key)) {
-      errors.push(`Unknown key: ${key}`);
+    if (!key) {
+      errors.push(`Unknown key: ${inputKey}`);
       continue;
     }
     if (values.has(key)) {
@@ -49,7 +56,7 @@ export function parseBuildRequest(text) {
     values.set(key, value);
   }
 
-  for (const required of ALLOWED_KEYS) {
+  for (const required of REQUIRED_KEYS) {
     if (!values.has(required)) errors.push(`Missing key: ${required}`);
   }
 
@@ -57,9 +64,8 @@ export function parseBuildRequest(text) {
 
   return {
     recognized: true,
-    value: {
-      branch: values.get('branch'),
-      profile: values.get('profile'),
-    },
+    value: Object.fromEntries(
+      REQUIRED_KEYS.map((key) => [key, values.get(key)]),
+    ),
   };
 }
