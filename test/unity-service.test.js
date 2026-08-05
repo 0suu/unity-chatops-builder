@@ -118,3 +118,70 @@ test('passes the resolved Unity project path to the Unity CLI', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('rejects a log-reported Android signing failure even when Unity exits zero', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'chatops-unity-signing-failure-'));
+  try {
+    const executable = path.join(directory, 'fake-unity.sh');
+    await writeFile(executable, `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-logFile" ]; then
+    shift
+    printf '%s\n' 'UnityException: Can not sign the application' 'Unable to sign the application; please provide passwords!' 'Build Finished, Result: Failure.' 'Exiting batchmode successfully now!' > "$1"
+    break
+  fi
+  shift
+done
+exit 0
+`);
+    await chmod(executable, 0o755);
+    const service = new UnityService({
+      config: { unity: { editorsRoot: directory, buildTimeoutMinutes: 90 } },
+      dataDir: path.join(directory, 'data'),
+      logger,
+    });
+
+    await assert.rejects(
+      () => service.build({
+        job: {
+          id: 'job-signing', repositoryAlias: 'repo', requestedBranch: 'develop', resolvedCommitSha: 'a'.repeat(40), buildProfilePath: 'Assets/BuildProfiles/PICO.asset',
+        },
+        workspacePath: path.join(directory, 'workspace'),
+        projectPath: path.join(directory, 'workspace'),
+        unityExecutable: executable,
+      }),
+      (error) => error.code === 'ANDROID_SIGNING_FAILED' && error.stage === 6 && error.category === 'UNITY_BUILD_ERROR',
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('scans the complete Unity log for a failure before a long successful shutdown tail', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'chatops-unity-log-scan-'));
+  try {
+    const executable = path.join(directory, 'fake-unity.sh');
+    await writeFile(executable, `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-logFile" ]; then
+    shift
+    printf '%s\n' 'Build Finished, Result: Failure.' > "$1"
+    i=0
+    while [ "$i" -lt 1000 ]; do printf '%s\n' 'successful-looking shutdown noise' >> "$1"; i=$((i + 1)); done
+    printf '%s\n' 'Exiting batchmode successfully now!' >> "$1"
+    break
+  fi
+  shift
+done
+exit 0
+`);
+    await chmod(executable, 0o755);
+    const service = new UnityService({ config: { unity: { buildTimeoutMinutes: 90 } }, dataDir: path.join(directory, 'data'), logger });
+    await assert.rejects(
+      () => service.build({ job: { id: 'job-log-scan', repositoryAlias: 'repo', requestedBranch: 'develop', resolvedCommitSha: 'b'.repeat(40), buildProfilePath: 'Assets/Profile.asset' }, workspacePath: directory, projectPath: directory, unityExecutable: executable }),
+      (error) => error.code === 'UNITY_BUILD_FAILED' && !error.details.logTail.includes('Build Finished'),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

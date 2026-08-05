@@ -1,5 +1,7 @@
 import { access, lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { CiError } from '../core/errors.js';
 import { STAGES } from '../core/stages.js';
@@ -8,10 +10,11 @@ import { runProcess, sanitizedEnvironment } from '../core/process-runner.js';
 import { tailFile } from '../utils/format.js';
 
 export class UnityService {
-  constructor({ config, dataDir, logger }) {
+  constructor({ config, dataDir, logger, androidSigningService = null }) {
     this.config = config;
     this.dataDir = dataDir;
     this.logger = logger;
+    this.androidSigningService = androidSigningService;
   }
 
   async inspectProject(workspacePath, buildProfilePath, projectPath = '.') {
@@ -137,17 +140,30 @@ export class UnityService {
       '-logFile', logPath,
     ];
 
-    const result = await runProcess(unityExecutable, args, {
-      timeoutMs: this.config.unity.buildTimeoutMinutes * 60_000,
-      env: sanitizedEnvironment(),
-      signal,
-      logger: this.logger,
-      onSpawn,
-      maxCaptureBytes: 1024 * 1024,
-    });
+    const signing = this.androidSigningService
+      ? await this.androidSigningService.prepare({ job, projectPath })
+      : { environment: {} };
 
+    let result;
+    try {
+      result = await runProcess(unityExecutable, args, {
+        timeoutMs: this.config.unity.buildTimeoutMinutes * 60_000,
+        env: sanitizedEnvironment(process.env, signing.environment),
+        signal,
+        logger: this.logger,
+        onSpawn,
+        maxCaptureBytes: 1024 * 1024,
+      });
+    } finally {
+      try { await signing.cleanup?.(); }
+      catch (error) { this.logger?.warn('Failed to remove the temporary Android signing hook.', { jobId: job.id, error }); }
+    }
+
+    const [logTail, reportedBuild] = await Promise.all([
+      tailFile(logPath),
+      inspectUnityBuildLog(logPath),
+    ]);
     if (result.code !== 0 || result.timedOut || result.aborted) {
-      const logTail = await tailFile(logPath);
       throw new CiError({
         code: result.timedOut ? 'UNITY_BUILD_TIMEOUT' : result.aborted ? 'UNITY_BUILD_ABORTED' : 'UNITY_BUILD_FAILED',
         category: result.aborted ? 'RUNNER_ERROR' : 'UNITY_BUILD_ERROR',
@@ -168,6 +184,47 @@ export class UnityService {
       });
     }
 
+    const reportedResult = reportedBuild.result;
+    if (reportedResult) {
+      const signingFailed = reportedBuild.signingFailed;
+      throw new CiError({
+        code: signingFailed ? 'ANDROID_SIGNING_FAILED' : reportedResult === 'cancelled' ? 'UNITY_BUILD_CANCELLED' : 'UNITY_BUILD_FAILED',
+        category: 'UNITY_BUILD_ERROR',
+        message: signingFailed
+          ? 'Androidアプリの署名に失敗しました。keystoreとkey aliasのパスワードを確認してください。'
+          : reportedResult === 'cancelled'
+            ? 'Unityがビルドのキャンセルを報告しました。'
+            : 'Unityがログ上でビルド失敗を報告しました。',
+        stage: STAGES.BUILDING,
+        details: {
+          exitCode: result.code,
+          signal: result.signal,
+          timedOut: result.timedOut,
+          logPath,
+          logTail,
+          stderr: result.stderr.trim().slice(-20_000),
+        },
+      });
+    }
+
     return { path: artifactPath, name: artifactName, logPath };
   }
+}
+
+async function inspectUnityBuildLog(logPath) {
+  let result = null;
+  let signingFailed = false;
+  const lines = createInterface({ input: createReadStream(logPath), crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      const match = /Build Finished, Result:\s*(Failure|Failed|Cancelled)\./i.exec(line);
+      if (match) result = match[1].toLowerCase() === 'cancelled' ? 'cancelled' : 'failure';
+      if (/Can not sign the application|Unable to sign the application; please provide passwords!/i.test(line)) signingFailed = true;
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  } finally {
+    lines.close();
+  }
+  return { result, signingFailed };
 }

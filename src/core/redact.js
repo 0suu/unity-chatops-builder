@@ -8,8 +8,8 @@ const BUILTIN_PATTERNS = [
 export class SecretRedactor {
   #secrets = new Set();
 
-  add(secret) {
-    if (typeof secret === 'string' && secret.length >= 8) this.#secrets.add(secret);
+  add(secret, { allowShort = false } = {}) {
+    if (typeof secret === 'string' && (allowShort ? secret.length > 0 : secret.length >= 8)) this.#secrets.add(secret);
   }
 
   redact(value) {

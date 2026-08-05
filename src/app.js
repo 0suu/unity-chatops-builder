@@ -10,6 +10,7 @@ import { DiscordAdapter } from './chat/discord-adapter.js';
 import { StatusService } from './chat/status-service.js';
 import { BuildCoordinator } from './chat/coordinator.js';
 import { UnityService } from './build/unity-service.js';
+import { AndroidSigningService } from './build/android-signing-service.js';
 import { NugetForUnityService } from './build/nuget-for-unity-service.js';
 import { ArtifactVerifier } from './build/artifact-verifier.js';
 import { ArtifactPublisher } from './build/artifact-publisher.js';
@@ -56,7 +57,18 @@ export class Application {
       const snapshotStore = new SourceSnapshotStore({ root: path.join(this.config.dataDir, 'source-snapshots'), workspaceRoot: path.join(this.config.dataDir, 'workspaces'), logger: this.logger });
       const sourceResolver = new RepositorySourceResolver({ config: this.config, dataDir: this.config.dataDir, logger: this.logger, endpointPolicy, lfsObjectCache, lfsClient, snapshotStore });
 
-      const unityService = new UnityService({ config: this.config, dataDir: this.config.dataDir, logger: this.logger });
+      const androidSigningRules = await Promise.all(this.config.unity.androidSigning.map(async (rule) => ({
+        ...rule,
+        keystorePassword: await resolveSecret(rule.keystorePassword, { redactor: this.redactor, logger: this.logger, label: `Android keystore password for ${rule.repository}` }),
+        keyaliasPassword: await resolveSecret(rule.keyaliasPassword, { redactor: this.redactor, logger: this.logger, label: `Android key alias password for ${rule.repository}` }),
+      })));
+      for (const rule of androidSigningRules) {
+        if (rule.keystorePassword.length < 6 || rule.keyaliasPassword.length < 6) throw new Error(`Android signing passwords for ${rule.repository} must contain at least 6 characters.`);
+        this.redactor?.add(rule.keystorePassword, { allowShort: true });
+        this.redactor?.add(rule.keyaliasPassword, { allowShort: true });
+      }
+      const androidSigningService = new AndroidSigningService({ rules: androidSigningRules });
+      const unityService = new UnityService({ config: this.config, dataDir: this.config.dataDir, logger: this.logger, androidSigningService });
       const dependencyRestorer = new NugetForUnityService({ config: this.config, logger: this.logger });
       const artifactVerifier = new ArtifactVerifier({ maxBytes: this.config.artifacts.maxBytes, logger: this.logger });
       const artifactPublisher = new ArtifactPublisher({ adapters: this.adapters });

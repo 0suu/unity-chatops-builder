@@ -22,6 +22,8 @@ Repository入力は次の順序で処理します。
 
 CoordinatorだけがRepository読み取りcredential、SSH Agent、Git credential helper、GitHub Token、LFS Authorization Header、Git/LFS network accessを利用します。Worker processへこれらを継承させず、Workspaceへ`.git`やGit configを含めません。
 
+Android署名credentialはRepository、Unity project、branch、Build Profileでscopeを限定します。ただし、一致するRepositoryのEditor codeは同じUnity process内で実行され、process stateを読み取れます。署名ruleを許可するRepositoryとbranchは、その署名鍵を扱える信頼済みコードとして扱ってください。より強い分離が必要な場合は、Unity build後の署名を別OS userまたは外部署名serviceへ分離してください。
+
 ## Git LFS
 
 - pointerのversion、OID SHA-256、sizeをstrictに検証

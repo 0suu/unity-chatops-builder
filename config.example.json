@@ -20,6 +20,7 @@
     "editorsRoot": "/Applications/Unity/Hub/Editor",
     "buildTimeoutMinutes": 90,
     "allowedBuildProfiles": [],
+    "androidSigning": [],
     "nugetForUnity": {
       "enabled": true,
       "restoreTimeoutSeconds": 600,

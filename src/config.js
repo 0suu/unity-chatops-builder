@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { validateBuildProfilePath } from './core/paths.js';
+import { validateBuildProfilePath, validateUnityProjectPath } from './core/paths.js';
 
 const STATUS_KEYS = Array.from({ length: 10 }, (_, index) => String(index));
 const DEFAULT_MAX_LFS_OBJECT_BYTES = 10 * 1024 ** 3;
@@ -62,6 +62,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
   const nugetForUnityEnabled = booleanValue(nugetForUnityRaw.enabled ?? true, 'unity.nugetForUnity.enabled', errors);
   const nugetRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.restoreTimeoutSeconds ?? nugetForUnityRaw.restore_timeout_seconds ?? 600, 'unity.nugetForUnity.restoreTimeoutSeconds', errors);
   const nugetCliRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.cliRestoreTimeoutSeconds ?? nugetForUnityRaw.cli_restore_timeout_seconds ?? 300, 'unity.nugetForUnity.cliRestoreTimeoutSeconds', errors);
+  const androidSigning = validateAndroidSigning(unity.androidSigning ?? unity.android_signing ?? [], errors, baseDirectory);
   const maxBytes = positiveInteger(artifacts.maxBytes ?? 1_000_000_000, 'artifacts.maxBytes', errors);
   const successfulRetentionDays = nonNegativeNumber(artifacts.successfulRetentionDays ?? 3, 'artifacts.successfulRetentionDays', errors);
   const failedRetentionDays = nonNegativeNumber(artifacts.failedRetentionDays ?? 1, 'artifacts.failedRetentionDays', errors);
@@ -91,6 +92,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
       editorsRoot,
       allowedBuildProfiles: buildProfiles,
       buildTimeoutMinutes,
+      androidSigning,
       nugetForUnity: {
         enabled: nugetForUnityEnabled,
         restoreTimeoutSeconds: nugetRestoreTimeoutSeconds,
@@ -123,6 +125,42 @@ function validateDiscord(value, errors, baseDirectory) {
   validateUniqueStatuses(statusEmojiIds, failureEmoji, 'discord', errors);
   return { enabled, guildId: nonEmptyString(value.guildId, 'discord.guildId', errors), token: validateSecretReference(value.token, 'discord.token', errors, baseDirectory), allowedChannelIds: stringArray(value.allowedChannelIds, 'discord.allowedChannelIds', errors, { nonEmpty: true }), allowedUserIds, allowedRoleIds, nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? 10 * 1024 * 1024, 'discord.nativeUploadLimitBytes', errors), statusEmojiIds, failureEmoji, threadAutoArchiveMinutes: discordArchiveDuration(value.threadAutoArchiveMinutes ?? 1440, errors) };
 }
+function validateAndroidSigning(value, errors, baseDirectory) {
+  if (!Array.isArray(value)) { errors.push('unity.androidSigning must be an array.'); return []; }
+  const normalized = value.map((entry, index) => {
+    const name = `unity.androidSigning.${index}`;
+    const rule = requirePlainObject(entry, name, errors);
+    const repository = nonEmptyString(rule.repository, `${name}.repository`, errors);
+    if (repository && (!/^[A-Za-z0-9.-]+\/[^/\s]+\/[^/\s]+$/.test(repository) || repository.endsWith('.git'))) errors.push(`${name}.repository must use canonical host/owner/repository form without .git.`);
+    const projectResult = validateUnityProjectPath(rule.project ?? '.');
+    if (!projectResult.ok) errors.push(`${name}.project: ${projectResult.reason}`);
+    const branches = stringArray(rule.branches, `${name}.branches`, errors, { nonEmpty: true });
+    const configuredProfiles = stringArray(rule.buildProfiles ?? rule.build_profiles, `${name}.buildProfiles`, errors, { nonEmpty: true });
+    const buildProfiles = configuredProfiles.filter((profile) => {
+      const result = validateBuildProfilePath(profile);
+      if (!result.ok) { errors.push(`${name}.buildProfiles contains invalid entry ${JSON.stringify(profile)}: ${result.reason}`); return false; }
+      return true;
+    });
+    return {
+      repository,
+      project: projectResult.ok ? projectResult.value : '.',
+      branches,
+      buildProfiles,
+      keystorePassword: validateSecretReference(rule.keystorePassword ?? rule.keystore_password, `${name}.keystorePassword`, errors, baseDirectory),
+      keyaliasPassword: validateSecretReference(rule.keyaliasPassword ?? rule.keyalias_password, `${name}.keyaliasPassword`, errors, baseDirectory),
+    };
+  });
+  const scopes = new Set();
+  for (const [index, rule] of normalized.entries()) {
+    for (const branch of rule.branches) for (const profile of rule.buildProfiles) {
+      const scope = JSON.stringify([rule.repository, rule.project, branch, profile]);
+      if (scopes.has(scope)) errors.push(`unity.androidSigning.${index} overlaps another Android signing rule for the same repository, project, branch, and Build Profile.`);
+      scopes.add(scope);
+    }
+  }
+  return normalized;
+}
+function requirePlainObject(value, name, errors) { if (!value || typeof value !== 'object' || Array.isArray(value)) { errors.push(`${name} must be an object.`); return {}; } return value; }
 function validateStatusMap(value, name, errors) { const map = value && typeof value === 'object' && !Array.isArray(value) ? value : {}; if (map !== value) errors.push(`${name} must be an object.`); return Object.fromEntries(STATUS_KEYS.map((key) => [key, nonEmptyString(map[key], `${name}.${key}`, errors)])); }
 function validateUniqueStatuses(map, failure, name, errors) { const values = Object.values(map).filter(Boolean); if (new Set(values).size !== values.length) errors.push(`${name} status emojis must be unique.`); if (values.includes(failure)) errors.push(`${name} failure emoji must differ from status emojis.`); }
 function validateSecretReference(value, name, errors, baseDirectory) { if (!value || typeof value !== 'object' || Array.isArray(value)) { errors.push(`${name} must be an object with env or file.`); return {}; } const hasEnv = typeof value.env === 'string' && value.env.length; const hasFile = typeof value.file === 'string' && value.file.length; if (Boolean(hasEnv) === Boolean(hasFile)) { errors.push(`${name} must specify exactly one of env or file.`); return {}; } return hasEnv ? { env: value.env } : { file: path.resolve(baseDirectory, value.file) }; }

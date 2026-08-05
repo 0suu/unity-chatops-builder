@@ -60,6 +60,31 @@ fresh workspaceでUnityの初回コンパイルより前にNuGet packageを復�
 }
 ```
 
+## Android署名
+
+Unityはkeystoreとkey aliasのパスワードをProjectSettingsへ保存しません。署名が必要なAndroid Build Profileには、秘密ファイルまたは環境変数をRepository・project・branch・Build Profileへ限定して設定します。
+
+```json
+{
+  "unity": {
+    "androidSigning": [
+      {
+        "repository": "github.com/PsychicVRLab/TheMoonCruiseTeNQ",
+        "project": "TheMoonCruise-Unity",
+        "branches": ["develop"],
+        "buildProfiles": ["Assets/Settings/Build Profiles/UserClient(Pico4UE) develop.asset"],
+        "keystorePassword": { "file": "/Users/unity-ci/.config/unity-chatops-builder/themooncruise-keystore-password" },
+        "keyaliasPassword": { "file": "/Users/unity-ci/.config/unity-chatops-builder/themooncruise-keyalias-password" }
+      }
+    ]
+  }
+}
+```
+
+秘密ファイルはRunner userだけが読める権限（`0600`）にしてください。値は起動時に読み込んでlogのredaction対象へ登録し、対象jobのUnity子processへだけ環境変数で渡します。Workspaceへ一時的に注入したEditor-only build callbackがビルド直前に値を読み、環境変数を消去して`PlayerSettings.Android.keystorePass`と`keyaliasPass`へ設定します。秘密値をUnityのcommand line引数やSource Snapshotへ書き込みません。
+
+設定したscopeと一致しないRepository、project、branch、Build Profileには署名値を渡しません。設定変更後はRunnerを再起動してください。
+
 ## SourceとGit LFS
 
 ```text
