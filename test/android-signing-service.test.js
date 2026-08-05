@@ -6,7 +6,7 @@ import path from 'node:path';
 import { AndroidSigningService } from '../src/build/android-signing-service.js';
 
 const matchingJob = {
-  repositoryAlias: 'github.com/PsychicVRLab/TheMoonCruiseTeNQ',
+  repositoryAlias: 'github.com/psychicvrlab/themooncruisetenq',
   projectPath: 'TheMoonCruise-Unity',
   requestedBranch: 'develop',
   buildProfilePath: 'Assets/Settings/Build Profiles/UserClient(Pico4UE) develop.asset',
