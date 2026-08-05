@@ -4,6 +4,7 @@ import { isPathInsideOrEqual } from '../core/paths.js';
 
 const KEYSTORE_PASSWORD_ENV = 'UNITY_CHATOPS_ANDROID_KEYSTORE_PASSWORD';
 const KEYALIAS_PASSWORD_ENV = 'UNITY_CHATOPS_ANDROID_KEYALIAS_PASSWORD';
+const SIGNING_MODE_ENV = 'UNITY_CHATOPS_ANDROID_SIGNING_MODE';
 
 const ASSEMBLY_DEFINITION = `${JSON.stringify({
   name: 'UnityChatOpsBuilder.AndroidSigning.Editor',
@@ -23,14 +24,31 @@ namespace UnityChatOpsBuilder.Generated
     {
         private const string KeystorePasswordEnvironmentVariable = "${KEYSTORE_PASSWORD_ENV}";
         private const string KeyaliasPasswordEnvironmentVariable = "${KEYALIAS_PASSWORD_ENV}";
+        private const string SigningModeEnvironmentVariable = "${SIGNING_MODE_ENV}";
 
         public int callbackOrder => int.MinValue;
 
         public void OnPreprocessBuild(BuildReport report)
         {
+            var signingMode = ReadAndClear(SigningModeEnvironmentVariable);
             if (report.summary.platform != BuildTarget.Android)
             {
-                throw new BuildFailedException("Android signing credentials were configured for a non-Android build.");
+                if (signingMode == "custom")
+                {
+                    throw new BuildFailedException("Android signing credentials were configured for a non-Android build.");
+                }
+                return;
+            }
+            if (signingMode == "debug")
+            {
+                PlayerSettings.Android.useCustomKeystore = false;
+                PlayerSettings.Android.keystorePass = string.Empty;
+                PlayerSettings.Android.keyaliasPass = string.Empty;
+                return;
+            }
+            if (signingMode != "custom")
+            {
+                throw new BuildFailedException("Unknown Android signing mode.");
             }
             if (!PlayerSettings.Android.useCustomKeystore || string.IsNullOrEmpty(PlayerSettings.Android.keystoreName) || string.IsNullOrEmpty(PlayerSettings.Android.keyaliasName))
             {
@@ -58,13 +76,15 @@ namespace UnityChatOpsBuilder.Generated
 `;
 
 export class AndroidSigningService {
-  constructor({ rules = [] } = {}) {
+  constructor({ rules = [], forceDebug = false } = {}) {
     this.rules = rules;
+    this.forceDebug = forceDebug;
   }
 
   async prepare({ job, projectPath }) {
     const rule = this.rules.find((candidate) => matches(candidate, job));
-    if (!rule) return { injected: false, environment: {} };
+    const mode = this.forceDebug ? 'debug' : rule ? 'custom' : null;
+    if (!mode) return { injected: false, environment: {} };
 
     const projectRealPath = await realpath(projectPath);
     const assetsPath = path.join(projectPath, 'Assets');
@@ -82,8 +102,11 @@ export class AndroidSigningService {
     return {
       injected: true,
       environment: {
-        [KEYSTORE_PASSWORD_ENV]: rule.keystorePassword,
-        [KEYALIAS_PASSWORD_ENV]: rule.keyaliasPassword,
+        [SIGNING_MODE_ENV]: mode,
+        ...(mode === 'custom' ? {
+          [KEYSTORE_PASSWORD_ENV]: rule.keystorePassword,
+          [KEYALIAS_PASSWORD_ENV]: rule.keyaliasPassword,
+        } : {}),
       },
       cleanup: () => rm(generatedRoot, { recursive: true, force: true }),
     };

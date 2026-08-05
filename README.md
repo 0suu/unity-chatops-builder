@@ -64,6 +64,16 @@ fresh workspaceでUnityの初回コンパイルより前にNuGet packageを復�
 
 Unityはkeystoreとkey aliasのパスワードをProjectSettingsへ保存しません。署名が必要なAndroid Build Profileには、秘密ファイルまたは環境変数をRepository・project・branch・Build Profileへ限定して設定します。
 
+すべてのAndroid buildをUnity標準のdebug keyで署名する場合は、次を設定します。これはcustom keystore ruleより優先されます。ストア配布には使用できず、本番署名版へ上書きinstallできない場合があります。
+
+```json
+{
+  "unity": {
+    "forceAndroidDebugSigning": true
+  }
+}
+```
+
 ```json
 {
   "unity": {

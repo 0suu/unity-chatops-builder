@@ -67,7 +67,7 @@ export class Application {
         this.redactor?.add(rule.keystorePassword, { allowShort: true });
         this.redactor?.add(rule.keyaliasPassword, { allowShort: true });
       }
-      const androidSigningService = new AndroidSigningService({ rules: androidSigningRules });
+      const androidSigningService = new AndroidSigningService({ rules: androidSigningRules, forceDebug: this.config.unity.forceAndroidDebugSigning });
       const unityService = new UnityService({ config: this.config, dataDir: this.config.dataDir, logger: this.logger, androidSigningService });
       const dependencyRestorer = new NugetForUnityService({ config: this.config, logger: this.logger });
       const artifactVerifier = new ArtifactVerifier({ maxBytes: this.config.artifacts.maxBytes, logger: this.logger });

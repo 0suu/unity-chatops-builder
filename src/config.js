@@ -63,6 +63,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
   const nugetRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.restoreTimeoutSeconds ?? nugetForUnityRaw.restore_timeout_seconds ?? 600, 'unity.nugetForUnity.restoreTimeoutSeconds', errors);
   const nugetCliRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.cliRestoreTimeoutSeconds ?? nugetForUnityRaw.cli_restore_timeout_seconds ?? 300, 'unity.nugetForUnity.cliRestoreTimeoutSeconds', errors);
   const androidSigning = validateAndroidSigning(unity.androidSigning ?? unity.android_signing ?? [], errors, baseDirectory);
+  const forceAndroidDebugSigning = booleanValue(unity.forceAndroidDebugSigning ?? unity.force_android_debug_signing ?? false, 'unity.forceAndroidDebugSigning', errors);
   const maxBytes = positiveInteger(artifacts.maxBytes ?? 1_000_000_000, 'artifacts.maxBytes', errors);
   const successfulRetentionDays = nonNegativeNumber(artifacts.successfulRetentionDays ?? 3, 'artifacts.successfulRetentionDays', errors);
   const failedRetentionDays = nonNegativeNumber(artifacts.failedRetentionDays ?? 1, 'artifacts.failedRetentionDays', errors);
@@ -93,6 +94,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
       allowedBuildProfiles: buildProfiles,
       buildTimeoutMinutes,
       androidSigning,
+      forceAndroidDebugSigning,
       nugetForUnity: {
         enabled: nugetForUnityEnabled,
         restoreTimeoutSeconds: nugetRestoreTimeoutSeconds,

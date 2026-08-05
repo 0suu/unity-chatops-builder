@@ -28,7 +28,7 @@ test('injects an Editor-only preprocessor and passes secrets only through the ch
     await mkdir(path.join(projectPath, 'Assets'), { recursive: true });
     const prepared = await new AndroidSigningService({ rules: [rule] }).prepare({ job: matchingJob, projectPath });
     assert.equal(prepared.injected, true);
-    assert.deepEqual(Object.values(prepared.environment).sort(), ['alias-secret', 'store-secret']);
+    assert.deepEqual(Object.values(prepared.environment).sort(), ['alias-secret', 'custom', 'store-secret']);
     const [folderName] = await readdir(path.join(projectPath, 'Assets'));
     const source = await readFile(path.join(projectPath, 'Assets', folderName, 'AndroidSigningPreprocessor.cs'), 'utf8');
     const asmdef = JSON.parse(await readFile(path.join(projectPath, 'Assets', folderName, 'UnityChatOpsBuilder.AndroidSigning.Editor.asmdef'), 'utf8'));
@@ -48,5 +48,23 @@ test('does not inject or expose credentials outside the exact repository, projec
   for (const changedField of ['repositoryAlias', 'projectPath', 'requestedBranch', 'buildProfilePath']) {
     const job = { ...matchingJob, [changedField]: 'different' };
     assert.deepEqual(await service.prepare({ job, projectPath: '/unused' }), { injected: false, environment: {} });
+  }
+});
+
+test('force-debug mode injects no password and takes precedence over matching custom signing credentials', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'chatops-android-debug-signing-'));
+  try {
+    const projectPath = path.join(directory, 'project');
+    await mkdir(path.join(projectPath, 'Assets'), { recursive: true });
+    const prepared = await new AndroidSigningService({ rules: [rule], forceDebug: true }).prepare({ job: matchingJob, projectPath });
+    assert.equal(prepared.injected, true);
+    assert.deepEqual(prepared.environment, { UNITY_CHATOPS_ANDROID_SIGNING_MODE: 'debug' });
+    const [folderName] = await readdir(path.join(projectPath, 'Assets'));
+    const source = await readFile(path.join(projectPath, 'Assets', folderName, 'AndroidSigningPreprocessor.cs'), 'utf8');
+    assert.match(source, /PlayerSettings\.Android\.useCustomKeystore = false/);
+    assert.doesNotMatch(source, /store-secret|alias-secret/);
+    await prepared.cleanup();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
