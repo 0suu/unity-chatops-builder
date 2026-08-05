@@ -106,7 +106,8 @@ export class LfsObjectCache {
       deletedCount += 1;
       deletedBytes += object.size;
     }
-    return { beforeBytes, afterBytes: remaining, deletedCount, deletedBytes };
+    const auxiliaryDeleted = await this.#cleanupAuxiliaryFiles(now);
+    return { beforeBytes, afterBytes: remaining, deletedCount, deletedBytes, auxiliaryDeleted };
   }
 
   async #ensure(pointer, downloader, signal) {
@@ -183,6 +184,23 @@ export class LfsObjectCache {
       }
     }
     return result;
+  }
+
+  async #cleanupAuxiliaryFiles(now) {
+    const tmpCutoff = now - DAY_MS;
+    const corruptCutoff = now - this.retentionDays * DAY_MS;
+    const deleted = { tmp: 0, corrupt: 0 };
+    for (const [name, root, cutoff] of [['tmp', this.tmpRoot, tmpCutoff], ['corrupt', this.corruptRoot, corruptCutoff]]) {
+      for (const entry of await safeReadDir(root)) {
+        if (!entry.isFile()) continue;
+        const filePath = path.join(root, entry.name);
+        let info;
+        try { info = await lstat(filePath); } catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
+        if (info.mtimeMs >= cutoff) continue;
+        await rm(filePath, { force: true }); deleted[name] += 1;
+      }
+    }
+    return deleted;
   }
 }
 

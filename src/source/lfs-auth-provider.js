@@ -25,7 +25,7 @@ export class LfsAuthProvider {
     if (remote.port) args.push('-p', String(remote.port));
     args.push(target, `git-lfs-authenticate ${remote.repositoryPath} download`);
     const result = await this.runProcess('ssh', args, { timeoutMs: 60_000, maxCaptureBytes: 256 * 1024, env: this.environment, logger: this.logger });
-    if (result.code !== 0 || result.timedOut || result.aborted) {
+    if (result.code !== 0 || result.timedOut || result.aborted || result.stdoutTruncated) {
       throw authError('SSHによるGit LFS認証に失敗しました。', { exitCode: result.code, signal: result.signal, timedOut: result.timedOut, stderr: result.stderr.trim().slice(-8000) });
     }
     let response;
@@ -40,6 +40,7 @@ export class LfsAuthProvider {
     const input = `protocol=https\nhost=${remote.host}${remote.port ? `:${remote.port}` : ''}\npath=${remote.repositoryPath}\n\n`;
     const result = await this.runProcess('git', ['credential', 'fill'], { input, timeoutMs: 30_000, maxCaptureBytes: 64 * 1024, env: this.environment, logger: this.logger });
     if (result.code !== 0) return { endpointUrl, headers: {} };
+    if (result.stdoutTruncated) throw authError('Git credential helperの応答が大きすぎて完全に取得できませんでした。');
     const credential = parseCredential(result.stdout);
     if (!credential.username && !credential.password) return { endpointUrl, headers: {} };
     if (!credential.username || !credential.password) throw authError('Git credential helperが不完全なcredentialを返しました。');

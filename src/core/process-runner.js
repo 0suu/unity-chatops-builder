@@ -45,16 +45,20 @@ export function runProcess(command, args, options = {}) {
     });
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let settled = false;
     let timedOut = false;
     let timeoutHandle;
     let forceKillHandle;
-    const append = (existing, chunk) => {
+    const append = (existing, chunk, markTruncated) => {
       const combined = Buffer.concat([existing, chunk]);
-      return combined.length <= maxCaptureBytes ? combined : combined.subarray(combined.length - maxCaptureBytes);
+      if (combined.length <= maxCaptureBytes) return combined;
+      markTruncated();
+      return combined.subarray(combined.length - maxCaptureBytes);
     };
-    child.stdout.on('data', (chunk) => { stdout = append(stdout, Buffer.from(chunk)); });
-    child.stderr.on('data', (chunk) => { stderr = append(stderr, Buffer.from(chunk)); });
+    child.stdout.on('data', (chunk) => { stdout = append(stdout, Buffer.from(chunk), () => { stdoutTruncated = true; }); });
+    child.stderr.on('data', (chunk) => { stderr = append(stderr, Buffer.from(chunk), () => { stderrTruncated = true; }); });
     if (input !== undefined) {
       child.stdin.on('error', (error) => {
         if (error?.code !== 'EPIPE' && !settled) { settled = true; cleanup(); reject(error); }
@@ -90,7 +94,7 @@ export function runProcess(command, args, options = {}) {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve({ command, args, code, signal: closeSignal, timedOut, aborted: Boolean(signal?.aborted), stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8') });
+      resolve({ command, args, code, signal: closeSignal, timedOut, aborted: Boolean(signal?.aborted), stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8'), stdoutTruncated, stderrTruncated });
     });
     function cleanup() {
       if (timeoutHandle) clearTimeout(timeoutHandle);

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateBuildProfilePath, validateUnityProjectPath } from './core/paths.js';
+import { normalizeRepositoryReference } from './source/repository-reference.js';
 
 const STATUS_KEYS = Array.from({ length: 10 }, (_, index) => String(index));
 const DEFAULT_MAX_LFS_OBJECT_BYTES = 10 * 1024 ** 3;
@@ -62,7 +63,7 @@ export function validateConfig(raw, baseDirectory = process.cwd()) {
   const nugetForUnityEnabled = booleanValue(nugetForUnityRaw.enabled ?? true, 'unity.nugetForUnity.enabled', errors);
   const nugetRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.restoreTimeoutSeconds ?? nugetForUnityRaw.restore_timeout_seconds ?? 600, 'unity.nugetForUnity.restoreTimeoutSeconds', errors);
   const nugetCliRestoreTimeoutSeconds = positiveInteger(nugetForUnityRaw.cliRestoreTimeoutSeconds ?? nugetForUnityRaw.cli_restore_timeout_seconds ?? 300, 'unity.nugetForUnity.cliRestoreTimeoutSeconds', errors);
-  const androidSigning = validateAndroidSigning(unity.androidSigning ?? unity.android_signing ?? [], errors, baseDirectory);
+  const androidSigning = validateAndroidSigning(unity.androidSigning ?? unity.android_signing ?? [], errors, baseDirectory, { defaultHost, allowedHosts });
   const forceAndroidDebugSigning = booleanValue(unity.forceAndroidDebugSigning ?? unity.force_android_debug_signing ?? false, 'unity.forceAndroidDebugSigning', errors);
   const maxBytes = positiveInteger(artifacts.maxBytes ?? 1_000_000_000, 'artifacts.maxBytes', errors);
   const successfulRetentionDays = nonNegativeNumber(artifacts.successfulRetentionDays ?? 3, 'artifacts.successfulRetentionDays', errors);
@@ -127,13 +128,14 @@ function validateDiscord(value, errors, baseDirectory) {
   validateUniqueStatuses(statusEmojiIds, failureEmoji, 'discord', errors);
   return { enabled, guildId: nonEmptyString(value.guildId, 'discord.guildId', errors), token: validateSecretReference(value.token, 'discord.token', errors, baseDirectory), allowedChannelIds: stringArray(value.allowedChannelIds, 'discord.allowedChannelIds', errors, { nonEmpty: true }), allowedUserIds, allowedRoleIds, nativeUploadLimitBytes: positiveInteger(value.nativeUploadLimitBytes ?? 10 * 1024 * 1024, 'discord.nativeUploadLimitBytes', errors), statusEmojiIds, failureEmoji, threadAutoArchiveMinutes: discordArchiveDuration(value.threadAutoArchiveMinutes ?? 1440, errors) };
 }
-function validateAndroidSigning(value, errors, baseDirectory) {
+function validateAndroidSigning(value, errors, baseDirectory, repositoryOptions) {
   if (!Array.isArray(value)) { errors.push('unity.androidSigning must be an array.'); return []; }
   const normalized = value.map((entry, index) => {
     const name = `unity.androidSigning.${index}`;
     const rule = requirePlainObject(entry, name, errors);
-    const repository = nonEmptyString(rule.repository, `${name}.repository`, errors);
-    if (repository && (!/^[A-Za-z0-9.-]+\/[^/\s]+\/[^/\s]+$/.test(repository) || repository.endsWith('.git'))) errors.push(`${name}.repository must use canonical host/owner/repository form without .git.`);
+    const repositoryInput = nonEmptyString(rule.repository, `${name}.repository`, errors);
+    const normalizedRepository = repositoryInput ? normalizeRepositoryReference(repositoryInput, repositoryOptions) : { ok: false };
+    if (!normalizedRepository.ok) errors.push(`${name}.repository must identify an allowlisted host, owner, and repository.`);
     const projectResult = validateUnityProjectPath(rule.project ?? '.');
     if (!projectResult.ok) errors.push(`${name}.project: ${projectResult.reason}`);
     const branches = stringArray(rule.branches, `${name}.branches`, errors, { nonEmpty: true });
@@ -144,7 +146,7 @@ function validateAndroidSigning(value, errors, baseDirectory) {
       return true;
     });
     return {
-      repository,
+      repository: normalizedRepository.ok ? normalizedRepository.value.id : repositoryInput,
       project: projectResult.ok ? projectResult.value : '.',
       branches,
       buildProfiles,

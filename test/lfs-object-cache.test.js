@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LfsObjectCache } from '../src/source/lfs-object-cache.js';
@@ -85,5 +85,26 @@ test('enforces total materialized LFS bytes per job', async () => {
       { path: 'b', oidSha256: 'b'.repeat(64), sizeBytes: 3 },
     ];
     await assert.rejects(() => objectCache.prepare({ pointers, lfsClient: {}, remoteUrl: '', endpointUrl: '' }), (error) => error.code === 'LFS_TOTAL_SIZE_LIMIT_EXCEEDED');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('cleans stale interrupted downloads and quarantined objects during GC', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'lfs-cache-'));
+  try {
+    const objectCache = cache(root, { retentionDays: 1 });
+    const staleTime = new Date(Date.now() - 3 * 86_400_000);
+    const recentTime = new Date();
+    await mkdir(path.join(root, 'tmp'), { recursive: true });
+    await mkdir(path.join(root, 'corrupt'), { recursive: true });
+    const staleTemp = path.join(root, 'tmp', 'stale.part');
+    const staleCorrupt = path.join(root, 'corrupt', 'stale-object');
+    const recentTemp = path.join(root, 'tmp', 'recent.part');
+    await Promise.all([writeFile(staleTemp, 'stale'), writeFile(staleCorrupt, 'stale'), writeFile(recentTemp, 'recent')]);
+    await Promise.all([utimes(staleTemp, staleTime, staleTime), utimes(staleCorrupt, staleTime, staleTime), utimes(recentTemp, recentTime, recentTime)]);
+    const result = await objectCache.gc({ now: Date.now() });
+    assert.deepEqual(result.auxiliaryDeleted, { tmp: 1, corrupt: 1 });
+    await assert.rejects(() => stat(staleTemp), /ENOENT/);
+    await assert.rejects(() => stat(staleCorrupt), /ENOENT/);
+    assert.equal((await stat(recentTemp)).isFile(), true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

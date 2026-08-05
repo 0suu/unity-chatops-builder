@@ -77,17 +77,18 @@ export class RepositorySourceResolver {
     if (resolved.code !== 0) throw sourceError('BRANCH_NOT_FOUND', '指定されたリモートブランチが見つかりません。', { repository: repository.id, branch, stderr: resolved.stderr.trim() });
     const commitSha = resolved.stdout.trim(); if (!/^[0-9a-f]{40,64}$/i.test(commitSha)) throw sourceError('INVALID_COMMIT_SHA', 'Gitが返したCommit SHAを検証できませんでした。'); return commitSha.toLowerCase();
   }
-  async #trackedFiles(stagingPath) { const result = await this.#git(['-C', stagingPath, 'ls-files', '-z']); this.#assertGit(result, 'SOURCE_FILE_LIST_FAILED', 'tracked file一覧を取得できませんでした。'); return result.stdout.split('\0').filter(Boolean); }
+  async #trackedFiles(stagingPath) { const result = await this.#git(['-C', stagingPath, 'ls-files', '-z']); this.#assertGit(result, 'SOURCE_FILE_LIST_FAILED', 'tracked file一覧を取得できませんでした。'); this.#assertOutputComplete(result, 'SOURCE_FILE_LIST_TRUNCATED', 'tracked file一覧が大きすぎて完全に取得できませんでした。'); return result.stdout.split('\0').filter(Boolean); }
   async #lfsTrackedPaths(stagingPath, tracked) {
     if (tracked.length === 0) return [];
     const result = await this.#git(['-C', stagingPath, 'check-attr', '-z', '--stdin', 'filter'], { input: `${tracked.join('\0')}\0`, maxCaptureBytes: 64 * 1024 * 1024 });
-    this.#assertGit(result, 'LFS_ATTRIBUTE_SCAN_FAILED', '.gitattributesからLFS対象を検出できませんでした。');
+    this.#assertGit(result, 'LFS_ATTRIBUTE_SCAN_FAILED', '.gitattributesからLFS対象を検出できませんでした。'); this.#assertOutputComplete(result, 'LFS_ATTRIBUTE_SCAN_TRUNCATED', 'LFS属性の検査結果が大きすぎて完全に取得できませんでした。');
     const fields = result.stdout.split('\0'); const selected = [];
     for (let index = 0; index + 2 < fields.length; index += 3) { const [file, attribute, value] = fields.slice(index, index + 3); if (attribute === 'filter' && value === 'lfs') selected.push(file); }
     return selected.sort((left, right) => left.localeCompare(right, 'en'));
   }
-  async #assertNoSubmodules(stagingPath) { const result = await this.#git(['-C', stagingPath, 'ls-files', '--stage', '-z']); this.#assertGit(result, 'SOURCE_FILE_LIST_FAILED', 'gitlink検査に失敗しました。'); const gitlinks = result.stdout.split('\0').filter(Boolean).filter((record) => record.startsWith('160000 ')); if (gitlinks.length > 0 || this.config.sourceDependencies.submodules.enabled) throw sourceError('SUBMODULES_DISABLED', '初期版ではGit submoduleを許可していません。', { count: gitlinks.length }); }
+  async #assertNoSubmodules(stagingPath) { const result = await this.#git(['-C', stagingPath, 'ls-files', '--stage', '-z']); this.#assertGit(result, 'SOURCE_FILE_LIST_FAILED', 'gitlink検査に失敗しました。'); this.#assertOutputComplete(result, 'SOURCE_FILE_LIST_TRUNCATED', 'gitlink検査結果が大きすぎて完全に取得できませんでした。'); const gitlinks = result.stdout.split('\0').filter(Boolean).filter((record) => record.startsWith('160000 ')); if (gitlinks.length > 0 || this.config.sourceDependencies.submodules.enabled) throw sourceError('SUBMODULES_DISABLED', '初期版ではGit submoduleを許可していません。', { count: gitlinks.length }); }
   #assertGit(result, code, message) { if (result.code === 0 && !result.timedOut && !result.aborted) return; throw sourceError(code, message, { exitCode: result.code, signal: result.signal, timedOut: result.timedOut, stderr: result.stderr.trim().slice(-20_000) }); }
+  #assertOutputComplete(result, code, message) { if (!result.stdoutTruncated) return; throw sourceError(code, message); }
   #git(args, overrides = {}) { return this.processRunner('git', args, { timeoutMs: this.timeoutMs, env: this.environment, logger: this.logger, ...overrides }); }
 }
 

@@ -65,6 +65,7 @@ export class BuildWorker {
       const artifact = await this.artifactVerifier.verify(candidate);
       this.store.setArtifact(job.id, artifact);
       job = this.store.getJob(job.id);
+      this.store.markDeliveryAttempted(job.id);
       const published = await this.artifactPublisher.publish(job, artifact, formatSuccess(job, artifact, Date.now() - startedAt));
       this.store.setDeliverySucceeded(job.id, published);
 

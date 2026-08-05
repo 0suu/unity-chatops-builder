@@ -31,6 +31,7 @@ test('normalizes scoped Android signing rules and secret paths', () => {
     keyaliasPassword: { env: 'ANDROID_KEYALIAS_PASSWORD' },
   }];
   const [rule] = validateConfig(input, '/tmp/config-root').unity.androidSigning;
+  assert.equal(rule.repository, 'github.com/psychicvrlab/themooncruisetenq');
   assert.equal(rule.keystorePassword.file, '/tmp/config-root/secrets/android-keystore-password');
   assert.deepEqual(rule.keyaliasPassword, { env: 'ANDROID_KEYALIAS_PASSWORD' });
   assert.deepEqual(rule.branches, ['develop']);
@@ -39,7 +40,7 @@ test('rejects broad, invalid, or overlapping Android signing rules', () => {
   const input = validConfig();
   const rule = { repository: 'PsychicVRLab/TheMoonCruiseTeNQ', project: '../outside', branches: [], buildProfiles: ['not-an-asset'], keystorePassword: {}, keyaliasPassword: {} };
   input.unity.androidSigning = [rule, rule];
-  assert.throws(() => validateConfig(input), (error) => /canonical host\/owner\/repository/.test(error.message) && /project/.test(error.message) && /branches/.test(error.message) && /buildProfiles/.test(error.message));
+  assert.throws(() => validateConfig(input), (error) => /project/.test(error.message) && /branches/.test(error.message) && /buildProfiles/.test(error.message));
 });
 test('rejects legacy fixed repository configuration and enabled submodules', () => { const input = validConfig(); input.repository = { alias: 'project', sshUrl: 'git@github.com:example/project.git' }; input.sourceDependencies.submodules.enabled = true; assert.throws(() => validateConfig(input), (error) => /Fixed repository/.test(error.message) && /submodules\.enabled=true/.test(error.message)); });
 test('rejects non-HTTPS or non-allowlisted LFS endpoint', () => { const input = validConfig(); input.sourceDependencies.gitLfs.endpointUrl = 'http://127.0.0.1/lfs'; assert.throws(() => validateConfig(input), /must be HTTPS/); });

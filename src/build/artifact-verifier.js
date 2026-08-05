@@ -60,6 +60,9 @@ export class ArtifactVerifier {
         stderr: listing.stderr.trim().slice(-20_000),
       });
     }
+    if (listing.stdoutTruncated) {
+      throw this.#error('ARTIFACT_LIST_TRUNCATED', 'APK内のファイル一覧が大きすぎて完全に検証できませんでした。');
+    }
 
     const entries = new Set(listing.stdout.split(/\r?\n/).filter(Boolean));
     if (!entries.has('AndroidManifest.xml')) {

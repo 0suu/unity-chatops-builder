@@ -157,6 +157,7 @@ export class JobStore {
   heartbeat(jobId) { this.db.prepare(`UPDATE jobs SET heartbeat_at = :now WHERE id = :jobId AND status = 'RUNNING'`).run({ jobId, now: new Date().toISOString() }); }
   setBuildSucceeded(jobId) { this.db.prepare(`UPDATE jobs SET build_result = 'SUCCEEDED' WHERE id = :jobId`).run({ jobId }); this.appendEvent(jobId, 'BUILD_SUCCEEDED', 6, null); }
   setArtifact(jobId, artifact) { this.db.prepare(`UPDATE jobs SET artifact_result = 'SUCCEEDED', artifact_path = :path, artifact_name = :name, artifact_size = :size, artifact_sha256 = :sha256 WHERE id = :jobId`).run({ jobId, path: artifact.path, name: artifact.name, size: artifact.size, sha256: artifact.sha256 }); this.appendEvent(jobId, 'ARTIFACT_VERIFIED', 7, { size: artifact.size, sha256: artifact.sha256 }); }
+  markDeliveryAttempted(jobId) { this.db.prepare(`UPDATE jobs SET delivery_result = 'IN_PROGRESS' WHERE id = :jobId`).run({ jobId }); this.appendEvent(jobId, 'DELIVERY_ATTEMPTED', 7, null); }
   setDeliverySucceeded(jobId, published) { this.db.prepare(`UPDATE jobs SET delivery_result = 'SUCCEEDED', published_json = :publishedJson WHERE id = :jobId`).run({ jobId, publishedJson: JSON.stringify(published ?? {}) }); this.appendEvent(jobId, 'DELIVERY_SUCCEEDED', 7, published ?? null); }
   markSuccess(jobId) { const now = new Date().toISOString(); this.db.prepare(`UPDATE jobs SET status = 'SUCCEEDED', job_result = 'SUCCEEDED', finished_at = :now, heartbeat_at = NULL, error_code = NULL, error_summary = NULL, error_details_json = NULL WHERE id = :jobId`).run({ jobId, now }); this.appendEvent(jobId, 'JOB_SUCCEEDED', 9, null); }
 
@@ -181,6 +182,10 @@ export class JobStore {
     const running = this.db.prepare(`SELECT * FROM jobs WHERE status = 'RUNNING' ORDER BY sequence`).all().map(mapJob);
     for (const job of running) {
       if (job.deliveryResult === 'SUCCEEDED') { this.markSuccess(job.id); this.setDesiredStatus(job.id, '9', 9); recovered.push({ jobId: job.id, action: 'finalized' }); continue; }
+      if (job.deliveryResult === 'IN_PROGRESS') {
+        this.markFailure(job.id, { code: 'RUNNER_INTERRUPTED_DURING_DELIVERY', category: 'RUNNER_ERROR', message: 'Runner stopped during artifact delivery; the job was not retried because the upload may have completed.', stage: 7 }, 'RUNNER_ERROR');
+        this.setDesiredStatus(job.id, 'failure', null); recovered.push({ jobId: job.id, action: 'delivery-attempt-failed' }); continue;
+      }
       if (job.sourceSnapshotId && job.attempt <= interruptedJobRetries) {
         this.db.prepare(`UPDATE jobs SET status = 'QUEUED', desired_status = '2', heartbeat_at = NULL, error_code = NULL, error_summary = NULL, error_details_json = NULL WHERE id = :jobId`).run({ jobId: job.id });
         this.appendEvent(job.id, 'JOB_RECOVERED_TO_QUEUE', 2, { previousAttempt: job.attempt }); recovered.push({ jobId: job.id, action: 'requeued' });

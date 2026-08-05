@@ -32,6 +32,21 @@ test('does not retry an interrupted worker without a published snapshot', async 
   } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('does not retry a job whose artifact delivery was in progress when the runner stopped', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'job-store-delivery-'));
+  const store = new JobStore(path.join(directory, 'jobs.sqlite3'));
+  try {
+    const { job } = store.createJob({ platform: 'slack', channelId: 'C1', sourceMessageId: 'delivery-1', requesterId: 'U1', repositoryAlias: 'project', requestedBranch: 'main', buildProfilePath: 'Assets/PICO.asset' });
+    store.setResolvedSource(job.id, { commitSha: 'a'.repeat(40), sourceSnapshotId: 'b'.repeat(64), sourceSnapshotManifest: {}, unityVersion: '6000.0.59f2' });
+    store.setQueued(job.id);
+    store.claimNextJob();
+    store.markDeliveryAttempted(job.id);
+    const recovery = store.recoverInterruptedJobs(1);
+    assert.deepEqual(recovery, [{ jobId: job.id, action: 'delivery-attempt-failed' }]);
+    assert.equal(store.getJob(job.id).errorCode, 'RUNNER_INTERRUPTED_DURING_DELIVERY');
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('migrates an existing initial-version database before creating the snapshot index', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const directory = await mkdtemp(path.join(os.tmpdir(), 'job-store-migration-'));
